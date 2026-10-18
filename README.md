@@ -2,9 +2,9 @@
 
 > **A change of plans, handled.**
 
-ShiftRescue helps volunteer coordinators handle last-minute absences and availability changes. Describe what changed, review Gemma’s interpretation, then preview and accept a schedule that satisfies staffing, skills, availability and hour limits.
+ShiftRescue helps volunteer coordinators set up events and handle last-minute absences. Describe an event to build a reviewed team and shift draft, or describe what changed to repair an existing rota. Preview and accept a schedule that satisfies staffing, skills, availability and hour limits.
 
-Create your own events, volunteers and shifts, or explore the fictional starter workspace. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
+Accounts start with an empty workspace. Create your own events, volunteers and shifts, or explicitly open an event you have saved. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
 
 **Live:** [shiftrescue.netlify.app](https://shiftrescue.netlify.app/)
 
@@ -14,13 +14,16 @@ Create your own events, volunteers and shifts, or explore the fictional starter 
 
 ### Event & Team Management
 
-- Create separate events with a name and date, or copy an existing roster.
+- Start with zero volunteers and shifts, then create separate events with a name and date or copy a roster you have opened.
 - Add, edit and remove volunteers with custom skills, multiple availability windows and maximum daily hours.
 - Define shifts with staffing requirements and required skill coverage.
 - Save incomplete setups as explicit drafts, then generate a valid first schedule.
 
 ### Gemma-Powered Requests
 
+- Create a new event from a description of its name, date, volunteers, skills, availability, hour limits and shift requirements.
+- Review and edit every extracted field, add or remove draft rows, and resolve missing details before saving a separate event to Supabase.
+- Generate assignments with the constraint engine after setup, then review and apply the schedule separately. Infeasible events remain editable drafts.
 - Interpret requests such as **“Nadia cannot work from 14:00 to 16:00.”**
 - Support multiple unavailable intervals and maximum-hour changes in one message.
 - Ask for clarification instead of guessing ambiguous times or unknown people.
@@ -41,6 +44,7 @@ Create your own events, volunteers and shifts, or explore the fictional starter 
 - Clearly label unknown refresh times and zero-quota/model-access problems.
 - Keep manual team editing and schedule generation available without an AI call.
 - Avoid automatic model requests on every page load.
+- Share quota warnings and retry timing between event setup and change requests; keep the event description when a request fails.
 
 ### Cloud Storage & Export
 
@@ -113,7 +117,7 @@ The API is named the Gemini API, but the app selects a **Gemma** model explicitl
 npm start
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The fictional local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The empty local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
 
 ### Tests & Production Build
 
@@ -124,6 +128,21 @@ npm run build
 ```
 
 Tests cover scheduling rules, fairness, search budgets, model-response validation, sessions, ownership-related API behavior, stale writes, draft setup, signed previews and quota timing including daylight-saving boundaries. Test model responses are fixtures and do not consume live Gemma quota. GitHub Actions runs the checks on pushes and pull requests.
+
+### Create an Event with Gemma
+
+1. Sign in and choose **Describe event with Gemma**.
+2. Include the event name/date, named volunteers with skills, availability and maximum hours, plus each shift’s time, staffing count and required skills.
+3. Choose **Create draft with Gemma**. Unknown details remain blank; clarification questions appear above the editable draft.
+4. Correct the draft, explicitly enter `none` where no skills or availability are intended, and resolve any questions.
+5. Choose **Create event & preview schedule**. This saves a new event with no assignments, then checks coverage with the deterministic scheduler.
+6. Review the proposal and choose **Apply repair** to save assignments. If coverage is impossible, adjust the saved team or shifts and generate again.
+
+Example brief:
+
+> Campus Help Day on 20 October 2026. Nadia has first-aid training; Rahim has no special skills. Both are available 10:00–14:00, maximum 4 hours each. Support desk: 10:00–12:00 and 12:00–14:00, one person per shift with first-aid coverage. Registration: the same two blocks, one person per shift, no special skills required.
+
+Setup never overwrites the selected event. Editing the description invalidates its previous model draft, so generate a fresh draft before saving. Model output is validated on the server; reviewed fields are validated again before the cloud write. No database migration or additional environment variable is needed for this feature.
 
 ---
 
@@ -184,11 +203,11 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 
 ## Data Storage
 
-- **Local workspace:** Fictional starter data and local edits are kept in browser storage. Loading a scripted scenario switches to that workspace and preserves cloud events. Scripted scenarios do not call Gemma.
+- **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in starts with an empty workspace; saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
 - **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
 - **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
 - **Accepted schedules:** Cloud saves are transactional and version-checked. Unconfirmed or failed repair requests preserve the accepted event. Setup edits that break coverage clear assignments into a draft until a valid schedule is generated.
-- **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Avoid unnecessary sensitive personal details.
+- **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
 - **Credentials:** Private environment files, credentials, local caches, dependencies, generated builds and backup artifacts are excluded by `.gitignore`. `.env.example` contains placeholders only. Never commit API keys or a Supabase service-role key.
 
 ---
@@ -196,7 +215,8 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 ## Roadmap / Known Limitations
 
 - Each event supports **12 volunteers, 8 shifts and 1–3 people per shift** on one day in **Asia/Dhaka**.
-- Gemma accepts up to **3,000 characters** and **24 changes** per request. Supported operations are unavailability and maximum-hour changes; use setup forms for people, skills and shifts.
+- Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 changes**, limited to unavailability and maximum-hour changes.
+- Setup supports one day in Dhaka, exact shift intervals, staffing and collective skill coverage. Required breaks, travel time, fixed assignments, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
 - Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
 - Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.
 - The search has a time/node budget; a valid best-so-far solution may not be proved optimal.
