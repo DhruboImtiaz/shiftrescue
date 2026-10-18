@@ -4,7 +4,7 @@
 
 ShiftRescue helps volunteer coordinators handle last-minute absences and availability changes. Describe what changed, review Gemma’s interpretation, then preview and accept a schedule that satisfies staffing, skills, availability and hour limits.
 
-Create your own events, volunteers and shifts, or explore the fictional starter workspace. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
+Accounts start with an empty workspace. Create your own events, volunteers and shifts, or explicitly open an event you have saved. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
 
 **Live:** [shiftrescue.netlify.app](https://shiftrescue.netlify.app/)
 
@@ -14,7 +14,7 @@ Create your own events, volunteers and shifts, or explore the fictional starter 
 
 ### Event & Team Management
 
-- Create separate events with a name and date, or copy an existing roster.
+- Start with zero volunteers and shifts, then create separate events with a name and date or copy a roster you have opened.
 - Add, edit and remove volunteers with custom skills, multiple availability windows and maximum daily hours.
 - Define shifts with staffing requirements and required skill coverage.
 - Save incomplete setups as explicit drafts, then generate a valid first schedule.
@@ -113,7 +113,7 @@ The API is named the Gemini API, but the app selects a **Gemma** model explicitl
 npm start
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The fictional local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The empty local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
 
 ### Tests & Production Build
 
@@ -184,7 +184,7 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 
 ## Data Storage
 
-- **Local workspace:** Fictional starter data and local edits are kept in browser storage. Loading a scripted scenario switches to that workspace and preserves cloud events. Scripted scenarios do not call Gemma.
+- **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in starts with an empty workspace; saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
 - **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
 - **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
 - **Accepted schedules:** Cloud saves are transactional and version-checked. Unconfirmed or failed repair requests preserve the accepted event. Setup edits that break coverage clear assignments into a draft until a valid schedule is generated.

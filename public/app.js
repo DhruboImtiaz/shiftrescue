@@ -23,11 +23,23 @@ const icons = {
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.check}</svg>`;
 $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
-let seed, scenarios, state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
+let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
 let editingShiftId = null, editingEvent = false, gemmaIssue = null;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
-const storageKey = 'shiftrescue-workspace-v1';
+const storageKey = 'shiftrescue-draft-v2';
+const selectedEventKey = userId => `shiftrescue-selected-v2-${userId}`;
+function emptyWorkspace() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const date = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  return { event: 'Untitled event', date: `${date.year}-${date.month}-${date.day}`, timezone: 'Asia/Dhaka', volunteers: [], shifts: [], schedule: {}, history: [] };
+}
+function clearWorkspace() {
+  currentEvent = null; state = emptyWorkspace(); interpretation = null; preview = null;
+  $('#request-input').value = '';
+  try { sessionStorage.removeItem('shiftrescue-request-draft'); } catch {}
+}
+
 async function api(path, data) {
   const response = await fetch(path, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json().catch(() => ({ error: response.status === 429 ? 'The site is receiving too many requests. Please wait before retrying.' : 'The server could not respond. Please retry.' }));
@@ -36,8 +48,9 @@ async function api(path, data) {
 }
 function persist() {
   try {
-    if (currentEvent && auth.user) localStorage.setItem(`shiftrescue-selected-${auth.user.id}`, currentEvent.id);
-    else { localStorage.setItem(storageKey, JSON.stringify(state)); if (auth.user) localStorage.removeItem(`shiftrescue-selected-${auth.user.id}`); }
+    if (currentEvent && auth.user) localStorage.setItem(selectedEventKey(auth.user.id), currentEvent.id);
+    else if (auth.user) localStorage.removeItem(selectedEventKey(auth.user.id));
+    else localStorage.setItem(storageKey, JSON.stringify(state));
   } catch { notify('Browser preferences could not be saved. Your accepted cloud event remains in Supabase.'); }
 }
 function notify(text, error = false) { const el = $('#notice'); el.textContent = text; el.className = `notice${error ? ' error' : ''}`; }
@@ -46,7 +59,7 @@ function person(id, list = state.volunteers) { return list.find(p => p.id === id
 function avatar(p) { const color = /^#[a-f\d]{6}$/i.test(p.color || '') ? p.color : '#7584b8'; return `<span class="avatar" style="background:${color}">${escape(p.name.charAt(0).toUpperCase())}</span>`; }
 function setBusy(value, button = null) {
   busy = value;
-  $$('button[data-scenario], #interpret-button, #reset-button, .edit-volunteer, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup').forEach(b => { b.disabled = value; });
+  $$('#interpret-button, #reset-button, .edit-volunteer, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup').forEach(b => { b.disabled = value; });
   $$('.button.busy').forEach(b => b.classList.remove('busy'));
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
@@ -64,13 +77,13 @@ function renderCloud() {
   $('#signed-in-panel').classList.toggle('hidden', !auth.user);
   $('#auth-form').classList.toggle('hidden', !!auth.user);
   $('#signed-in-email').textContent = auth.user?.email || '';
-  $('#event-select').innerHTML = '<option value="">Local demo · not cloud saved</option>' + savedEvents.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
+  $('#event-select').innerHTML = '<option value="">Choose a saved event or create a new one</option>' + savedEvents.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
   $('#event-select').value = currentEvent?.id || '';
-  $('#cloud-status').textContent = currentEvent ? `Saved to Supabase · version ${currentEvent.version}` : auth.user ? 'Local demo · save as an event to keep it in the cloud' : 'Sign in to save with Supabase';
+  $('#cloud-status').textContent = currentEvent ? `Saved to Supabase · version ${currentEvent.version}` : auth.user ? 'Create an event to start your own roster' : 'Sign in to create and save your event';
   $('#cloud-status').classList.toggle('saved', !!currentEvent);
   $('#reload-event').classList.toggle('hidden', !currentEvent);
   $('#edit-event').classList.toggle('hidden', !currentEvent);
-  $('#reset-button').innerHTML = icon('reset') + (currentEvent ? 'Open local demo' : 'Reset demo');
+  $('#reset-button').innerHTML = icon('reset') + 'Back to empty workspace';
   $('#event-date-label').textContent = new Date(`${state.date}T00:00:00+06:00`).toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'long', year: 'numeric' });
   $('#event-name-label').textContent = `${state.event} · GMT+6`;
 }
@@ -82,11 +95,12 @@ function adoptCloud(data) {
   persist(); render(); renderPreview(); renderInterpretation();
 }
 async function refreshEventList() { if (auth.user) savedEvents = (await api('/api/events')).events; else savedEvents = []; renderCloud(); }
-async function restoreCloud() {
+async function restoreCloud({ resume = true } = {}) {
   await refreshEventList();
-  let last; try { last = localStorage.getItem(`shiftrescue-selected-${auth.user.id}`); } catch {}
-  const selected = savedEvents.find(e => e.id === last) || savedEvents[0];
+  let last; try { if (resume) last = localStorage.getItem(selectedEventKey(auth.user.id)); } catch {}
+  const selected = savedEvents.find(e => e.id === last);
   if (selected) adoptCloud(await api(`/api/events/${selected.id}`));
+  else { clearWorkspace(); persist(); render(); renderPreview(); renderInterpretation(); }
 }
 function setAuthMode(mode) {
   authMode = mode; $('#auth-title').textContent = mode === 'signup' ? 'Your next event starts here.' : 'Welcome back.';
@@ -102,14 +116,16 @@ function renderMetrics() {
   const covered = state.shifts.filter(s => checkSchedule(state.volunteers.map(p => ({ ...p, maxHours: 24 })), [s], { [s.id]: state.schedule[s.id] }).valid).length;
   const hours = Object.values(check.workloads).reduce((a, b) => a + b, 0);
   const repairs = state.history.filter(entry => !entry.kind || entry.kind === 'repair').length;
-  $('#metrics').innerHTML = metric('Shifts covered', `${covered}<span>/ ${state.shifts.length}</span>`, check.valid ? 'Every rule satisfied' : 'Review schedule constraints', 'shield', 'green') + metric('Volunteers on the team', state.volunteers.length, 'Good people. A shared purpose.', 'users') + metric('Volunteer hours', `${hours}<span>hrs</span>`, 'Across the day’s assignments', 'clock', 'orange-bg') + metric('Repairs applied', repairs, repairs ? 'Changes recorded in activity' : 'Ready when plans change', 'shuffle', 'purple');
-  $('#schedule-status').textContent = check.valid ? 'All covered' : 'Draft · needs coverage';
+  $('#metrics').innerHTML = metric('Shifts covered', `${covered}<span>/ ${state.shifts.length}</span>`, check.valid ? 'Every rule satisfied' : state.shifts.length ? 'Review schedule constraints' : 'Your event starts with a blank roster', 'shield', 'green') + metric('Volunteers on the team', state.volunteers.length, 'Good people. A shared purpose.', 'users') + metric('Volunteer hours', `${hours}<span>hrs</span>`, 'Across the day’s assignments', 'clock', 'orange-bg') + metric('Repairs applied', repairs, repairs ? 'Changes recorded in activity' : 'Ready when plans change', 'shuffle', 'purple');
+  $('#schedule-status').textContent = check.valid ? 'All covered' : state.shifts.length ? 'Draft · needs coverage' : 'No shifts yet';
   $('[data-view=board] .nav-count').textContent = state.shifts.length;
   $('[data-view=team] .nav-count').textContent = state.volunteers.length;
   $('#team-count').textContent = `${state.volunteers.length} / 12 volunteers`;
   $('#generate-schedule').textContent = check.valid ? 'Check & rebalance' : 'Generate schedule';
   $('#schedule-status').className = `badge ${check.valid ? 'green' : 'rose'}`;
   $('#history-count').textContent = state.history.length;
+  $('#request-input').placeholder = state.volunteers.length ? `e.g. ${state.volunteers[0].name} cannot work from 14:00 to 16:00.` : 'Add your team and shifts first, then describe a change.';
+  $('#request-hint').textContent = state.volunteers.length && state.shifts.length ? 'Use a name + a time' : 'Set up your event to use Gemma';
 }
 function renderBoard() {
   const times = [...new Set(state.shifts.map(s => s.start))].sort((a, b) => a - b);
@@ -121,7 +137,8 @@ function renderBoard() {
       const p = person(id);
       return `<div class="assignment ${latest?.added.includes(id) ? 'new-person' : ''}">${avatar(p)}<span class="person-name">${escape(p.name)}</span>${latest?.added.includes(id) ? '<small>new</small>' : p.skills.includes('first-aid') ? `<span title="First-aid trained">${icon('shield')}</span>` : ''}</div>`;
     }).join('')}<div class="shift-note">${icon(valid ? 'check' : 'alert')}${!valid ? 'Coverage needs attention' : s.skills.includes('first-aid') ? 'First-aid coverage included' : `${assigned.length} of ${s.required} volunteers assigned`}</div></article>`;
-  }).join('')}</div></div>`).join('') || '<div class="empty-state"><h3>Start with your team and shifts.</h3><p>Open Manage team & shifts to set up this event, then generate a schedule.</p></div>';
+  }).join('')}</div></div>`).join('') || `<div class="empty-state"><h3>${currentEvent ? 'Add the first shift for your event.' : 'Your workspace starts here.'}</h3><p>${currentEvent ? 'Open Manage team & shifts to add your people, availability and staffing requirements.' : 'Create your own event, then add the volunteers and shifts you need.'}</p>${!currentEvent ? '<button id="empty-create-event" class="button primary">Create your first event</button>' : ''}</div>`;
+  $('#empty-create-event')?.addEventListener('click', () => $('#new-event').click());
 }
 function renderTeam() {
   const { workloads } = checkSchedule(state.volunteers, state.shifts, state.schedule);
@@ -131,7 +148,7 @@ function renderTeam() {
 function renderHistory() {
   $('#history-list').innerHTML = state.history.length ? state.history.map(entry => `<article class="history-entry"><span class="scenario-icon purple">${icon('shuffle')}</span><div class="history-copy"><h3>${escape(entry.title)}</h3><p>${escape(entry.text)}</p><div class="history-tag"><span class="badge ${entry.source === 'gemma' ? 'purple' : 'neutral'}">${entry.source === 'gemma' ? 'INTERPRETED BY GEMMA' : entry.source === 'team' ? 'TEAM SETTINGS' : 'SCRIPTED SCENARIO'}</span></div></div><small>${escape(new Date(entry.at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' }))} Dhaka</small></article>`).join('') : `<div class="empty-state">${icon('history')}<h3>A clear day so far.</h3><p>Applied repairs will appear here, with a record of what changed.</p></div>`;
 }
-function render() { renderMetrics(); renderBoard(); renderTeam(); renderShifts(); renderHistory(); renderCloud(); }
+function render() { renderMetrics(); renderBoard(); renderTeam(); renderShifts(); renderHistory(); renderCloud(); renderGemmaStatus(); }
 function showView(view) {
   for (const name of ['board', 'team', 'history']) $(`#${name}-view`).classList.toggle('hidden', name !== view);
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
@@ -232,7 +249,7 @@ function renderGemmaStatus() {
   const box = $('#gemma-status'); if (!box) return;
   box.classList.toggle('hidden', !gemmaIssue);
   const remaining = gemmaIssue?.retryAt ? Math.max(0, Date.parse(gemmaIssue.retryAt) - Date.now()) : 0;
-  $('#interpret-button').disabled = busy || remaining > 0;
+  $('#interpret-button').disabled = busy || remaining > 0 || !state?.volunteers.length || !state?.shifts.length;
   if (!gemmaIssue) return;
   const retry = gemmaIssue.retryAt ? new Date(gemmaIssue.retryAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + ' Dhaka (GMT+6)' : null;
   const mins = Math.ceil(remaining / 60000);
@@ -285,16 +302,6 @@ $('#request-form').addEventListener('submit', async event => {
     clearGemmaError(); connection.verified = true; renderConnection(); renderInterpretation();
   } catch (error) { showGemmaError(error); notify(error.message, true); } finally { setBusy(false); }
 });
-$$('[data-scenario]').forEach(button => button.addEventListener('click', () => {
-  if (busy) return;
-  const scenario = scenarios[button.dataset.scenario];
-  currentEvent = null;
-  state = structuredClone(seed); state.history = []; persist(); render(); showView('board'); clearNotice(); preview = null; renderPreview();
-  $('#request-input').value = scenario.text;
-  interpretation = { status: 'ready', message: scenario.text, changes: scenario.changes, source: 'scenario' }; renderInterpretation();
-  notify('Scripted scenario loaded in the local demo. Your cloud events are unchanged. Confirm the changes to run the scheduling engine.');
-  $('#interpretation').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}));
 $('#connection-button').addEventListener('click', () => { if (auth.configured && !auth.user) { $('#auth-dialog').showModal(); return; } $('#connection-message').textContent = ''; $('#connection-dialog').showModal(); });
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
 $('#connection-dialog').addEventListener('close', () => { $('#key-input').value = ''; });
@@ -324,9 +331,8 @@ $('#edit-form').addEventListener('submit', async event => {
 });
 $('#reset-button').addEventListener('click', () => {
   if (busy) return;
-  currentEvent = null;
-  state = structuredClone(seed); state.history = []; interpretation = null; preview = null; $('#request-input').value = '';
-  render(); renderInterpretation(); renderPreview(); persist(); clearNotice(); showView('board'); notify('Local demo reset. Your saved cloud events and Gemma connection were kept.');
+  clearWorkspace(); render(); renderInterpretation(); renderPreview(); persist(); clearNotice(); showView('board');
+  notify('Opened an empty workspace. Your saved events remain available in the event selector.');
 });
 $('#export-button').addEventListener('click', () => {
   const cell = value => { let text = String(value); if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`; return `"${text.replace(/"/g, '""')}"`; };
@@ -345,21 +351,21 @@ $('#auth-form').addEventListener('submit', async event => {
   try {
     const result = await api(`/api/auth/${authMode}`, { email: $('#auth-email').value.trim(), password });
     if (result.confirmationRequired) { setAuthMode('signin'); $('#auth-message').textContent = result.message; return; }
-    auth.user = result.user; renderCloud(); await restoreCloud(); $('#auth-dialog').close();
-    notify(savedEvents.length ? 'Signed in. Your saved events are ready.' : 'Signed in. Click Save as new event to keep this team and schedule in Supabase.');
+    auth.user = result.user; clearWorkspace(); render(); await restoreCloud({ resume: false }); $('#auth-dialog').close();
+    notify(savedEvents.length ? 'Signed in. Create a new event or choose one of your saved events.' : 'Signed in. Create your first event to get started.');
 
   } catch (error) { $('#auth-message').textContent = error.message; } finally { setBusy(false); }
 });
 $('#signout-button').addEventListener('click', async () => {
   if (busy) return; setBusy(true, $('#signout-button'));
   try {
-    await api('/api/auth/signout', {}); auth.user = null; currentEvent = null; savedEvents = []; state = structuredClone(seed); interpretation = null; preview = null;
+    await api('/api/auth/signout', {}); auth.user = null; savedEvents = []; clearWorkspace();
     $('#auth-dialog').close(); render(); renderInterpretation(); renderPreview(); showView('board'); notify('Signed out. Your cloud events remain private to your account.');
   } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });
 $('#edit-event').addEventListener('click', () => { editingEvent = true; openEventDialog(); });
 function openEventDialog() {
-  $('#event-name').value = editingEvent ? state.event : ''; $('#event-date-input').value = state.date; $('#event-message').textContent = ''; $('#event-copy').checked = false; $('#event-copy-label').classList.toggle('hidden', editingEvent); $('#event-description').textContent = editingEvent ? 'Update the event name or date. Shift times stay in Dhaka.' : 'Start with an empty roster or copy the current team and shifts.'; $('#create-event-button').textContent = editingEvent ? 'Save event settings' : 'Create saved event'; $('#event-dialog').showModal();
+  $('#event-name').value = editingEvent ? state.event : ''; $('#event-date-input').value = state.date; $('#event-message').textContent = ''; $('#event-copy').checked = false; $('#event-copy-label').classList.toggle('hidden', editingEvent || !(state.volunteers.length || state.shifts.length)); $('#event-description').textContent = editingEvent ? 'Update the event name or date. Shift times stay in Dhaka.' : 'Create an event for your own team, shifts and schedule.'; $('#create-event-button').textContent = editingEvent ? 'Save event settings' : 'Create saved event'; $('#event-dialog').showModal();
 }
 $('#new-event').addEventListener('click', () => {
   if (busy) return;
@@ -377,7 +383,7 @@ $('#event-form').addEventListener('submit', async event => {
 $('#event-select').addEventListener('change', async event => {
   if (busy) return;
   const id = event.target.value;
-  if (!id) { currentEvent = null; state = structuredClone(seed); interpretation = null; preview = null; render(); renderInterpretation(); renderPreview(); persist(); return; }
+  if (!id) { clearWorkspace(); render(); renderInterpretation(); renderPreview(); persist(); return; }
   setBusy(true);
   try { adoptCloud(await api(`/api/events/${id}`)); clearNotice(); } catch (error) { notify(error.message, true); renderCloud(); } finally { setBusy(false); }
 });
@@ -388,15 +394,16 @@ $('#reload-event').addEventListener('click', async () => {
 async function init() {
   if (/access_token=|refresh_token=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   try {
-    const [data, status, account] = await Promise.all([api('/api/demo'), api('/api/status'), api('/api/auth/session')]);
-    scenarios = data.scenarios; delete data.scenarios; seed = { ...data, history: [] }; state = structuredClone(seed); connection = status; auth = account;
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey));
-      if (saved?.date === seed.date && Array.isArray(saved.history) && saved.history.length <= 50) {
-        validateData(saved.volunteers, saved.shifts, saved.schedule, { allowEmpty: true });
-        state = saved;
-      }
-    } catch { /* A stale or invalid saved workspace never replaces the valid demo. */ }
+    const [status, account] = await Promise.all([api('/api/status'), api('/api/auth/session')]);
+    state = emptyWorkspace(); connection = status; auth = account;
+    if (!auth.user) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey));
+        if (saved && typeof saved.event === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.date) && saved.timezone === 'Asia/Dhaka' && Array.isArray(saved.history) && saved.history.length <= 50) {
+          validateData(saved.volunteers, saved.shifts, saved.schedule, { allowEmpty: true }); state = saved;
+        }
+      } catch { /* Ignore invalid browser drafts and old demo preferences. */ }
+    }
     render(); renderConnection(); renderGemmaStatus();
     try { $('#request-input').value = sessionStorage.getItem('shiftrescue-request-draft') || ''; } catch {}
     if (auth.user) await restoreCloud();

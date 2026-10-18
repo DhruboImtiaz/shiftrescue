@@ -7,7 +7,7 @@ export function validateModel(model) {
 }
 
 export async function callGemma({ key, model }, prompt) {
-  if (!key || key === 'your_google_ai_studio_key_here') throw new Error('Connect a Google AI Studio key to use natural-language requests. The scheduling scenarios work without a key.');
+  if (!key || key === 'your_google_ai_studio_key_here') throw new Error('Connect a Google AI Studio key to use natural-language requests. Manual event setup and scheduling remain available without a key.');
   validateModel(model);
   let response;
   try {
