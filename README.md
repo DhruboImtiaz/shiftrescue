@@ -1,139 +1,121 @@
-# ShiftRescue
+# ShiftRescue — Volunteer Schedule Rescue
 
-**A change of plans, handled.**
+> **A change of plans, handled.**
 
-ShiftRescue helps volunteer coordinators recover when someone calls in sick, loses availability or needs fewer hours. Describe the change in plain language, review Gemma’s interpretation, and preview a repaired schedule before accepting it.
+ShiftRescue helps volunteer coordinators handle last-minute absences and availability changes. Describe what changed, review Gemma’s interpretation, then preview and accept a schedule that satisfies staffing, skills, availability and hour limits.
 
-It also supports real event setup: create an event, add volunteers and their skills, define shifts, and generate a valid first schedule. Email/password accounts and private saved events use Supabase. The full stack deploys to **Netlify**, including the backend.
+Create your own events, volunteers and shifts, or explore the fictional starter workspace. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
 
-## Why this exists
+**Live:** [shiftrescue.netlify.app](https://shiftrescue.netlify.app/)
 
-A last-minute absence can trigger several replacements. A spreadsheet can show a gap, but finding cover still requires checking skills, availability, overlapping shifts and total hours. ShiftRescue checks those rules together and tries to preserve as much of the existing rota as possible.
+---
 
 ## Features
 
-- **Your own events:** names, dates, volunteers, multiple availability windows, custom skills, hour limits and shifts.
-- **Gemma interpretation:** translates natural-language changes into structured constraints, with clarification for ambiguity.
-- **Verified scheduling:** checks staffing, skill coverage, full-shift availability, overlaps and maximum hours.
-- **Review before apply:** interpretation, repair preview and final acceptance are separate steps.
-- **Private cloud storage:** Supabase Auth, row-level ownership policies, atomic saves and stale-version protection.
-- **Quota fallback:** the Gemma panel displays a retry/refresh time when available. Manual team editing and schedule generation continue without an AI call.
-- **Activity and export:** saved change history and CSV export.
-- **Netlify backend:** server functions, HTTPS cookies and signed previews that survive independent function invocations.
+### Event & Team Management
 
-## Run locally
+- Create separate events with a name and date, or copy an existing roster.
+- Add, edit and remove volunteers with custom skills, multiple availability windows and maximum daily hours.
+- Define shifts with staffing requirements and required skill coverage.
+- Save incomplete setups as explicit drafts, then generate a valid first schedule.
 
-Requires **Node.js 22 or newer**.
+### Gemma-Powered Requests
+
+- Interpret requests such as **“Nadia cannot work from 14:00 to 16:00.”**
+- Support multiple unavailable intervals and maximum-hour changes in one message.
+- Ask for clarification instead of guessing ambiguous times or unknown people.
+- Validate structured model output before it reaches the scheduling engine.
+- Review the interpretation and resulting repair separately before applying changes.
+
+### Constraint-Based Scheduling
+
+- Check full-shift availability, staffing, required skills, overlapping assignments and total hours.
+- Minimize replacements in the existing rota, then use workload balance to break ties.
+- Independently validate every returned schedule.
+- Distinguish proved infeasibility from a search limit, and a proved optimum from a valid best-so-far result.
+
+### Quota Fallback
+
+- Show Gemma quota errors inside the Gemma panel while preserving the request and accepted schedule.
+- Display Google’s retry time or the expected daily quota refresh in **Dhaka time**, when known.
+- Clearly label unknown refresh times and zero-quota/model-access problems.
+- Keep manual team editing and schedule generation available without an AI call.
+- Avoid automatic model requests on every page load.
+
+### Cloud Storage & Export
+
+- Email/password accounts with private events stored in Supabase.
+- Atomic saves and version checks to prevent stale tabs overwriting newer work.
+- Saved activity history and CSV export.
+- Short-lived signed repair previews that work across independent Netlify function calls.
+
+---
+
+## Tech Stack
+
+| Concern | Solution |
+| --- | --- |
+| Interface | HTML, CSS and vanilla JavaScript modules |
+| Server | Node.js 22+ with Web Request/Response handlers |
+| AI | Google’s hosted Gemma through the Gemini API |
+| Scheduling | Deterministic bounded search with pruning |
+| Backend & Auth | [Supabase](https://supabase.com/) — PostgreSQL and Auth |
+| Testing | Node.js built-in test runner |
+| Deployment | [Netlify](https://www.netlify.com/) — static assets and server functions |
+| Continuous Integration | GitHub Actions |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js 22 or newer** and npm.
+- A [Google AI Studio](https://aistudio.google.com/apikey) key with access to a hosted Gemma model.
+- A Supabase project for accounts and cloud storage.
+
+For a new Supabase project, apply [`supabase/schema.sql`](supabase/schema.sql) once and enable email/password authentication. Existing installations of the earlier ShiftRescue schema should apply [`supabase/upgrade-drafts.sql`](supabase/upgrade-drafts.sql) instead of re-running the initial schema. The connected ShiftRescue project already has this upgrade.
+
+### Installation
 
 ```bash
+git clone https://github.com/DhruboImtiaz/shiftrescue.git
+cd shiftrescue
 npm ci
 cp .env.example .env
-# Fill in your private settings in .env.
+```
+
+### Environment Variables
+
+Fill the local `.env` file privately:
+
+```dotenv
+GEMINI_API_KEY=your_google_ai_studio_key
+GEMMA_MODEL=gemma-4-26b-a4b-it
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_PUBLISHABLE_KEY=your_project_publishable_key
+PROPOSAL_SECRET=your_random_secret_of_at_least_32_characters
+COOKIE_SECURE=false
+PORT=5173
+```
+
+The local server generates `PROPOSAL_SECRET` if it is missing or still uses the example placeholder. To generate a separate value for deployment:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+The API is named the Gemini API, but the app selects a **Gemma** model explicitly. Check model access in your Google project; see the [hosted Gemma guide](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api). No Supabase service-role key is required.
+
+### Run Locally
+
+```bash
 npm start
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The local server generates a private `PROPOSAL_SECRET` automatically if it is missing. Keep `.env` private; it is excluded from Git.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The fictional local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
 
-| Variable | Purpose |
-| --- | --- |
-| `GEMINI_API_KEY` | Google AI Studio key, used only on the server |
-| `GEMMA_MODEL` | Hosted Gemma model ID; default `gemma-4-26b-a4b-it` |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_PUBLISHABLE_KEY` | Project publishable key; no service-role key is required |
-| `PROPOSAL_SECRET` | Independent random secret, at least 32 characters, signing repair previews |
-| `PORT` | Local port, default `5173` |
-| `COOKIE_SECURE` | `false` for local HTTP; HTTPS deployments use secure cookies |
-
-The service is called the Gemini API, but the app explicitly selects a **Gemma** model. Obtain a key in [Google AI Studio](https://aistudio.google.com/apikey) and check that the chosen model is available to your project. See Google’s [hosted Gemma guide](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
-
-Without Supabase, the local fictional workspace and solver remain usable. Without a Gemma key, manual settings and the scripted scenarios still work. Public Netlify use of the model requires a signed-in Supabase account.
-
-## Set up Supabase
-
-1. Create a Supabase project.
-2. Run [`supabase/schema.sql`](supabase/schema.sql) once in its SQL editor. It creates five tables, ownership policies and two transactional functions.
-3. Enable **email/password** authentication. The app does not offer guest sign-in.
-4. Put the project URL and publishable key in your local environment or Netlify environment settings.
-5. In Supabase **Authentication → URL Configuration**, set your deployed site as the Site URL and add the local and deployed origins to the allowed redirect URLs as needed.
-
-For the earlier ShiftRescue schema, use [`supabase/upgrade-drafts.sql`](supabase/upgrade-drafts.sql) once instead of re-running the initial schema. The connected ShiftRescue project has already received this upgrade.
-
-Create an account through the app, confirm the email if required, then return and sign in. Supabase dashboard sign-in is separate from app sign-in. Auth settings such as email delivery, signup limits and compromised-password protection are managed in Supabase; production use should configure those settings for its audience.
-
-## Deploy to Netlify
-
-Full instructions: **[NETLIFY.md](NETLIFY.md)**.
-
-1. Import this GitHub repository into Netlify.
-2. Use build command **`npm run build`**, publish directory **`dist`**, and functions directory **`netlify/functions`**. These are already specified in `netlify.toml`.
-3. Add the server environment variables above. Generate a strong `PROPOSAL_SECRET`; do not use the example placeholder.
-4. Deploy, then update Supabase’s Site URL/redirect settings with the real HTTPS site address.
-5. Verify sign-in, event creation, schedule generation, Gemma interpretation and applying a repair on the deployed site.
-
-Deploy the repository with its function code. Uploading only the static `dist` folder omits the backend. Netlify builds the `/api/*` function separately, and secrets belong in Netlify’s server environment settings, never in browser files.
-
-## Use your own event
-
-1. **Sign in**, then choose **New event**. Leave the copy option unchecked for an empty event.
-2. Open **Manage team & shifts**. Add volunteers with skills, availability and maximum daily hours.
-3. Add shifts with their staffing requirements and required skills. For each required skill, at least one person assigned to that shift must have it.
-4. Click **Generate schedule**, inspect the preview and **Apply repair**.
-5. When someone’s plans change, describe the update in the Gemma box. Review the interpretation, confirm it, review the repair and apply it.
-6. Use **Refresh** to load a newer cloud version, **Activity** to inspect changes, and **Export** for a CSV.
-
-Setup edits save immediately. If they break coverage, assignments are cleared into an explicit **draft**; generate a new valid schedule before using the rota. Unconfirmed repairs do not change the accepted event. A stale preview or a preview older than ten minutes must be regenerated.
-
-The local demo contains fictional volunteers and six shifts on 18 October 2026. Opening a scripted scenario switches to that local workspace and leaves your cloud events intact. Scripted scenarios use predefined constraints and do **not** call Gemma.
-
-### Example requests
-
-```text
-Nadia cannot work from 14:00 to 16:00.
-Nadia can work a maximum of 2 hours today.
-Nadia, Sumi and Farhana are unavailable from 14:00 to 16:00.
-All first-aid volunteers are unavailable from 14:00 to 16:00.
-```
-
-Use names from your current event and exact 24-hour times. Requests are limited to **3,000 characters** and **24 changes**. “Nadia cannot work after 2” should produce a clarification instead of guessing 02:00 or 14:00. Changes to other event dates or unsupported operations also require clarification.
-
-## Gemma quota behavior
-
-On a Google `429` response, the Gemma box displays the limit message and preserves your request and accepted schedule.
-
-- If Google supplies `Retry-After` or `google.rpc.RetryInfo`, the app displays the retry timestamp in **Dhaka time** and a countdown.
-- If the response identifies a daily quota, it displays the expected next **midnight Pacific** refresh, converted using the correct daylight-saving offset.
-- If no reset time is supplied, the box explicitly says the refresh time is unknown. A quota of zero is treated as a model-access/quota configuration issue rather than a promise that waiting will fix it.
-- The app does not repeatedly call the model in the background or make automatic connection-test calls on every page load.
-
-A retry time is an earliest retry/expected quota window, not a guarantee of capacity. Quota is shared across Google projects, so the app cannot infer a reliable “requests remaining” number. Check [AI Studio’s rate limits](https://aistudio.google.com/rate-limit) for account-specific usage. Google documents the daily request reset in its [rate-limit guide](https://ai.google.dev/gemini-api/docs/rate-limits).
-
-## How it works
-
-```text
-Browser → same-origin Node/Netlify API → Gemma interpretation
-                                  ↘ deterministic scheduling search
-                                  ↘ Supabase Auth + owner-isolated PostgreSQL
-```
-
-**Gemma interprets; the solver schedules.** The model returns structured unavailability or maximum-hour changes. The server rejects invalid JSON, unknown people, unsupported operations and invalid values before they reach the solver.
-
-The solver enumerates eligible teams for each shift, then searches with pruning. Its first objective minimizes removed person–shift assignments relative to the current rota. For a fully staffed rota with unchanged staffing, those removals correspond to replacements. Its second objective minimizes the sum of squared working minutes to balance workloads among equally small repairs. Every returned solution receives a separate rule check.
-
-The search is bounded by time and node count. It distinguishes a proven optimum, a valid solution without proved optimality, proved infeasibility, and a search limit without a solution. It never calls a timeout proof of impossibility.
-
-## Data and security
-
-- All five application tables have row-level security and account ownership policies. Queries use the verified user’s token and a publishable key.
-- Database functions run as the caller (`SECURITY INVOKER`); no service-role credential is used.
-- Events, people, shifts, assignments and activity save atomically. Version checks prevent stale tabs from overwriting new work.
-- Auth tokens use HttpOnly, SameSite cookies. Deployed cookies are Secure. Passwords and tokens are not placed in browser local storage.
-- Cloud previews are HMAC-signed, bound to an owner/event/version and expire after ten minutes. Replays fail once the event version advances.
-- Requests are same-origin, size-limited, and use a restrictive content security policy. The Netlify API has a per-IP request limit.
-- The local demo uses browser storage. The selected cloud event ID and a tab’s unsent message/quota notice may also be stored in browser preferences. API keys stay on the server.
-
-Volunteer names, skills, availability and your request are sent to Google when you choose to use Gemma. Do not enter sensitive personal details that scheduling does not require.
-
-## Development and checks
+### Tests & Production Build
 
 ```bash
 npm test
@@ -141,30 +123,90 @@ npm run check
 npm run build
 ```
 
-Tests cover scheduling constraints, search budgets, fairness, malformed model output, auth verification, cookies, version conflicts, draft setup, quota resets including daylight-saving boundaries, cross-origin rejection, signed preview tampering/expiry and the Netlify request adapter. GitHub Actions runs these checks on pushes and pull requests. Unit tests use explicit model fixtures and do not consume live Gemma quota.
+Tests cover scheduling rules, fairness, search budgets, model-response validation, sessions, ownership-related API behavior, stale writes, draft setup, signed previews and quota timing including daylight-saving boundaries. Test model responses are fixtures and do not consume live Gemma quota. GitHub Actions runs the checks on pushes and pull requests.
 
-```text
-public/                 Responsive browser interface
-src/api.mjs             Shared Web Request/Response API
-src/scheduler.mjs       Pure validation and scheduling search
-src/gemma.mjs           Hosted Gemma interpretation
-src/quota.mjs           Provider retry metadata and daily refresh calculation
-src/cloud.mjs           Supabase Auth and versioned persistence
-src/proposals.mjs       Stateless signed repair previews
-src/demo.mjs            Fictional starter workspace and scenarios
-server.mjs              Local HTTP server and private environment loading
-netlify/functions/      Deployed backend entry point
-scripts/                Build and syntax checks
-supabase/               Initial schema and existing-install upgrade
-test/                  Automated tests
-```
+---
 
-## Prototype limits
+## Deployment
 
-An event supports **12 volunteers, 8 shifts, 1–3 people per shift**, and a single day in **Asia/Dhaka**. The model handles availability reductions and maximum-hour changes; use setup forms to add people, change skills or define shifts. Overnight shifts, recurring events, invitations, SMS/email dispatch, negotiated swaps and shared multi-coordinator workspaces are outside this version. Each account owns its own events.
+ShiftRescue is deployed at **[shiftrescue.netlify.app](https://shiftrescue.netlify.app/)** through Netlify. This project includes a backend; publishing only static files does not deploy its API.
 
-This repository is ready for a Netlify deployment; a production URL and its final hosted checks depend on your Netlify environment configuration.
+### Netlify Configuration
+
+Import this repository and deploy the `main` branch. The root `netlify.toml` supplies:
+
+| Setting | Value |
+| --- | --- |
+| Base directory | Repository root |
+| Build command | `npm run build` |
+| Publish directory | `dist` |
+| Functions directory | `netlify/functions` |
+| Node version | `22` |
+
+### Private Server Settings
+
+In **Netlify → Project configuration → Environment variables**, add:
+
+- `GEMINI_API_KEY`
+- `GEMMA_MODEL`
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `PROPOSAL_SECRET`
+- `COOKIE_SECURE=true`
+
+Use the existing private service settings, rather than the example placeholders. Include the **Functions** scope and production deploy context. Mark credentials as secret values where available. Keep the signing secret stable across deployments; changing it invalidates pending previews without deleting saved events. `PORT` is only needed locally.
+
+**Commit the code; configure credentials in Netlify.** The ignored local `.env` file is not uploaded through GitHub. After adding or changing environment variables, trigger a new production deploy so the functions receive them.
+
+### Supabase Authentication URLs
+
+In **Supabase → Authentication → URL Configuration**:
+
+- Set **Site URL** to `https://shiftrescue.netlify.app`.
+- Add `https://shiftrescue.netlify.app/**` to allowed redirect URLs when needed for confirmation links.
+- Retain `http://127.0.0.1:5173/**` if local development is still needed.
+
+Confirm signup emails when required, then return to the app and sign in. Accounts work across deployments, but a localhost browser session does not transfer to the public domain.
+
+### Deployment Checks
+
+1. `/api/auth/session` should report `configured: true` for Supabase.
+2. `/api/status` should report `configured: true` for Gemma, without exposing a key.
+3. Sign in, create an event, add a volunteer and shift, generate a schedule and apply it.
+4. Reload the page and confirm the event is restored.
+5. Send a real Gemma request, review the interpretation, then preview and apply the repair.
+
+If sign-in says **“Supabase has not been configured on the server,”** check both Supabase environment variables in the production Functions scope, then redeploy. Do not fix this by adding credentials to source code. A missing Gemma key affects natural-language requests; a missing signing secret prevents cloud repair previews from being accepted.
+
+Netlify’s request limit and Google’s model quota are separate. For quota timing, the app uses provider retry metadata and Google’s documented daily request refresh at midnight Pacific time. If the provider supplies no reset information, it displays that uncertainty. See [Netlify environment variables](https://docs.netlify.com/build/configure-builds/environment-variables/) and [Google rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+---
+
+## Data Storage
+
+- **Local workspace:** Fictional starter data and local edits are kept in browser storage. Loading a scripted scenario switches to that workspace and preserves cloud events. Scripted scenarios do not call Gemma.
+- **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
+- **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
+- **Accepted schedules:** Cloud saves are transactional and version-checked. Unconfirmed or failed repair requests preserve the accepted event. Setup edits that break coverage clear assignments into a draft until a valid schedule is generated.
+- **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Avoid unnecessary sensitive personal details.
+- **Credentials:** Private environment files, credentials, local caches, dependencies, generated builds and backup artifacts are excluded by `.gitignore`. `.env.example` contains placeholders only. Never commit API keys or a Supabase service-role key.
+
+---
+
+## Roadmap / Known Limitations
+
+- Each event supports **12 volunteers, 8 shifts and 1–3 people per shift** on one day in **Asia/Dhaka**.
+- Gemma accepts up to **3,000 characters** and **24 changes** per request. Supported operations are unavailability and maximum-hour changes; use setup forms for people, skills and shifts.
+- Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
+- Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.
+- The search has a time/node budget; a valid best-so-far solution may not be proved optimal.
+- [ ] Shared coordinator workspaces and invitations.
+- [ ] Volunteer availability collection and confirmed swaps.
+- [ ] Calendar integration, recurring events and overnight shifts.
+- [ ] SMS/email notifications.
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Built with Node.js, browser web standards, Supabase and Google’s hosted Gemma. No model weights are redistributed.
+MIT — see [LICENSE](LICENSE). No model weights are distributed with the project.

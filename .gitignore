@@ -1,10 +1,53 @@
+# Private environment configuration; publish only the placeholder template.
 .env
 .env.*
+*.env
+*.env.*
 !.env.example
+
+# Credentials, private signing material and authenticated browser state.
+secrets/
+credentials.json
+credentials.*.json
+service-account*.json
+*-service-account.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+.auth/
+playwright/.auth/
+storage-state*.json
+storageState*.json
+*.har
+
+# Dependencies, builds and hosting state.
 node_modules/
-.DS_Store
-*.log
 dist/
+build/
 .netlify/
 coverage/
-.env.tmp
+.nyc_output/
+.cache/
+*.tsbuildinfo
+
+# Logs, local exports, database dumps and temporary copies.
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.dump
+*.backup
+*.sql.gz
+*.bak
+*.orig
+*.tmp
+*~
+
+# Local editor and operating-system files.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*.local.json
