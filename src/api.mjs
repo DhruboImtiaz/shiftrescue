@@ -1,6 +1,7 @@
 import { demo, scenarios } from './demo.mjs';
 import { applyChanges, checkSchedule, repairSchedule, validateData } from './scheduler.mjs';
-import { callGemma, interpretRequest, validateModel } from './gemma.mjs';
+import { callGemma, interpretRequest, interpretEventSetup, validateModel } from './gemma.mjs';
+import { compileSetupDraft } from './setup.mjs';
 import { cloudService, AppError, safeUser, validateEventState } from './cloud.mjs';
 import { proposalTokens } from './proposals.mjs';
 
@@ -77,6 +78,18 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           if (cloud.configured || hosted) await cloud.session(req, res, true);
           await callGemma(config, 'Reply with the single word READY.'); verified = true;
           return send(200, { configured: true, verified, model: config.model });
+        }
+        if (pathname === '/api/setup/interpret') {
+          if (cloud.configured || hosted) await cloud.session(req, res, true);
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+          const result = await interpretEventSetup(config, input.request, today);
+          verified = true; return send(200, result);
+        }
+        if (pathname === '/api/setup/create') {
+          const active = await cloud.session(req, res, true);
+          const state = compileSetupDraft(input.draft);
+          validateEventState(state);
+          return send(201, await cloud.save(active, null, 0, state, { kind: 'setup', title: 'Event created from reviewed Gemma draft', text: 'The coordinator reviewed the event, volunteers and shifts before saving. Assignments are generated and reviewed separately.', source: 'gemma', differences: [] }));
         }
         if (pathname === '/api/interpret') {
           const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;
