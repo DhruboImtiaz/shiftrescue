@@ -1,6 +1,7 @@
 import { validateChanges } from './scheduler.mjs';
 import { quotaDetails, GemmaQuotaError } from './quota.mjs';
 import { reviewSetupDraft } from './setup.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 export function validateModel(model) {
   if (typeof model !== 'string' || !/^gemma-[a-zA-Z0-9.-]{1,100}$/.test(model)) throw new Error('Choose a hosted Gemma model name, such as gemma-4-26b-a4b-it.');
@@ -10,22 +11,38 @@ export function validateModel(model) {
 export async function callGemma({ key, model }, prompt, { maxOutputTokens = 2048 } = {}) {
   if (!key || key === 'your_google_ai_studio_key_here') throw new Error('Connect a Google AI Studio key to use natural-language requests. Manual event setup and scheduling remain available without a key.');
   validateModel(model);
-  let response;
-  try {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST', signal: AbortSignal.timeout(45000),
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens, ...(model.startsWith('gemma-4-') ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}) } })
-    });
-  } catch (error) {
-    if (error.name === 'TimeoutError') throw new Error('Gemma took longer than 45 seconds. Please retry. Your schedule has not changed.');
-    throw new Error('Could not reach Google’s Gemma API. Check your internet connection and try again.');
-  }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
+  // One deadline covers all attempts, response bodies and backoff waits.
+  const signal = AbortSignal.timeout(45000);
+  const serviceError = (message, status = 503) => Object.assign(new Error(message), { status });
+  const timeout = () => serviceError('Gemma took longer than 45 seconds. Please retry. Your schedule has not changed.', 504);
+  const pause = async attempt => {
+    try { await delay(1000 * 2 ** attempt + Math.floor(Math.random() * 250), undefined, { signal }); }
+    catch { throw timeout(); }
+  };
+  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens, ...(model.startsWith('gemma-4-') ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}) } });
+  let payload;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response;
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body
+      });
+      payload = await response.json().catch(error => { if (signal.aborted) throw error; return {}; });
+    } catch (error) {
+      if (signal.aborted || error.name === 'TimeoutError' || error.name === 'AbortError') throw timeout();
+      if (attempt === 2) throw serviceError('Could not reach Google’s Gemma API after three attempts. Please retry. Your message and saved schedule have been kept.');
+      await pause(attempt); continue;
+    }
+    if (response.ok) break;
+    // Quota and credential errors need user action or provider retry timing.
     if (response.status === 429) throw new GemmaQuotaError(quotaDetails(payload, response.headers));
-    const detail = String(payload.error?.message || 'Check your API key, model access and quota.').split(key).join('[redacted]').slice(0, 600);
-    throw new Error(`Gemma API (${response.status}): ${detail}`);
+    if (![408, 500, 502, 503, 504].includes(response.status)) {
+      const detail = String(payload?.error?.message || 'Check your API key, model access and quota.').split(key).join('[redacted]').slice(0, 600);
+      throw new Error(`Gemma API (${response.status}): ${detail}`);
+    }
+    if (attempt === 2) throw serviceError(`Google’s Gemma service is temporarily unavailable (HTTP ${response.status}) after three attempts. Please retry shortly. Your message and saved schedule have been kept.`);
+    await pause(attempt);
   }
   const text = (payload.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
   if (payload.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error('Gemma’s answer was cut short. Try a smaller event description. Your saved events have not changed.');

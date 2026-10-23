@@ -44,6 +44,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Clearly label unknown refresh times and zero-quota/model-access problems.
 - Keep manual team editing and schedule generation available without an AI call.
 - Avoid automatic model requests on every page load.
+- Retry temporary Gemma service/network failures up to three attempts within one 45-second deadline. Quota and credential errors are returned immediately.
 - Share quota warnings and retry timing between event setup and change requests; keep the event description when a request fails.
 
 ### Cloud Storage & Export
