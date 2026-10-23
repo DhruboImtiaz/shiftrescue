@@ -126,8 +126,8 @@ function renderMetrics() {
   $('#generate-schedule').textContent = check.valid ? 'Check & rebalance' : 'Generate schedule';
   $('#schedule-status').className = `badge ${check.valid ? 'green' : 'rose'}`;
   $('#history-count').textContent = state.history.length;
-  $('#request-input').placeholder = state.volunteers.length ? `e.g. ${state.volunteers[0].name} cannot work from 14:00 to 16:00.` : 'Add your team and shifts first, then describe a change.';
-  $('#request-hint').textContent = state.volunteers.length && state.shifts.length ? 'Use a name + a time' : 'Set up your event to use Gemma';
+  $('#request-input').placeholder = state.volunteers.length && state.shifts.length ? `e.g. Assign ${state.volunteers[0].name} to ${state.shifts[0].station}, ${clock(state.shifts[0].start)}–${clock(state.shifts[0].end)}.` : 'Add your team and shifts first, then describe a change.';
+  $('#request-hint').textContent = state.volunteers.length && state.shifts.length ? 'Use names + shift or time' : 'Set up your event to use Gemma';
 }
 function renderBoard() {
   const times = [...new Set(state.shifts.map(s => s.start))].sort((a, b) => a - b);
@@ -163,13 +163,17 @@ function showView(view) {
 }
 function changeDescription(c, people = state.volunteers) {
   const p = person(c.volunteerId, people);
+  if (c.type === 'assign') {
+    const shift = state.shifts.find(s => s.id === c.shiftId);
+    return `${p.name}: assign to ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}`;
+  }
   return c.type === 'max_hours' ? `${p.name}: maximum ${c.hours} working hours` : `${p.name}: unavailable ${c.start}–${c.end}`;
 }
 function renderInterpretation() {
   const el = $('#interpretation');
   if (!interpretation) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  el.innerHTML = `<span class="badge ${interpretation.source === 'gemma' ? 'purple' : 'neutral'}">${interpretation.source === 'gemma' ? 'GEMMA INTERPRETATION' : 'SCRIPTED SCENARIO'}</span><p>${escape(interpretation.message)}</p>${interpretation.changes.map(c => `<div class="change-line">${escape(changeDescription(c))}</div>`).join('')}<div class="provenance">${interpretation.source === 'gemma' ? escape(interpretation.model) : 'Demo instructions are predefined. Gemma was not called.'}</div>${interpretation.status === 'ready' ? '<button id="find-cover" class="button primary full">Confirm & find cover</button>' : ''}`;
+  el.innerHTML = `<span class="badge ${interpretation.source === 'gemma' ? 'purple' : 'neutral'}">${interpretation.source === 'gemma' ? 'GEMMA INTERPRETATION' : 'SCRIPTED SCENARIO'}</span><p>${escape(interpretation.message)}</p>${interpretation.changes.map(c => `<div class="change-line">${escape(changeDescription(c))}</div>`).join('')}<div class="provenance">${interpretation.source === 'gemma' ? escape(interpretation.model) : 'Demo instructions are predefined. Gemma was not called.'}</div>${interpretation.status === 'ready' ? `<button id="find-cover" class="button primary full">${interpretation.changes.some(c => c.type === 'assign') ? 'Confirm & preview schedule' : 'Confirm & find cover'}</button>` : ''}`;
   $('#find-cover')?.addEventListener('click', () => runRepair(interpretation.changes, interpretation.source, interpretation.message));
 }
 async function runRepair(changes, source, requestText, people = state.volunteers) {
@@ -191,10 +195,16 @@ function renderPreview() {
     el.innerHTML = `<div class="eyebrow muted">${exhausted ? 'CONSTRAINT CONFLICT' : 'SEARCH LIMIT REACHED'}</div><h2>${exhausted ? 'This shift needs more than a shuffle.' : 'We need more search time.'}</h2><p>${exhausted ? 'No valid schedule satisfies these changes. Your current rota is unchanged.' : 'No solution was found within the search budget. This does not prove the request is impossible.'}</p><ul class="conflict-list">${preview.diagnostics.map(text => `<li>${escape(text)}</li>`).join('')}</ul><div class="repair-actions"><button id="discard-preview" class="button subtle">Dismiss</button></div>`;
   } else {
     const count = preview.changedAssignments;
+    const requested = preview.assignments || [];
     el.innerHTML = `<div class="eyebrow muted">YOUR REPAIR PREVIEW</div><h2>${count ? 'A little reshuffle. Back on track.' : preview.differences.length ? 'Your schedule is ready.' : 'The current rota still works.'}</h2><p>${escape(preview.requestText)} Your changes take effect only when you apply this repair.</p><div class="repair-summary"><span class="badge green">${icon('check')} All rules satisfied</span><span class="badge purple">${count} previous assignment${count === 1 ? '' : 's'} replaced</span><span class="badge neutral">${preview.optimal ? 'FEWEST CHANGES VERIFIED' : 'VALID SOLUTION · OPTIMALITY NOT PROVEN'}</span></div>${preview.differences.map(d => `<div class="diff-row"><div><strong>${escape(d.station)}</strong><small>${clock(d.start)}–${clock(d.end)}</small></div><span class="removed-name">${d.removed.map(id => escape(person(id).name)).join(', ')}</span>${icon('arrow')}<span class="added-name">${d.added.map(id => escape(person(id, preview.volunteers).name)).join(', ')}</span></div>`).join('')}<p class="fine-print">${preview.nodes.toLocaleString()} search states checked in ${preview.elapsedMs} ms. The solver checks every rule again before returning a result.${preview.optimal ? ' Workload balance breaks ties between equally small repairs.' : ''}</p><div class="repair-actions"><button id="discard-preview" class="button subtle">Keep current schedule</button><button id="apply-repair" class="button primary">Apply repair ${icon('check')}</button></div>`;
+    if (requested.length) {
+      const summary = document.createElement('div');
+      summary.innerHTML = `<h3>Requested assignments</h3>${requested.map(c => `<div class="change-line">${escape(changeDescription(c, preview.volunteers))}</div>`).join('')}<p class="fine-print">These placements are required for this preview. Later repairs may move volunteers when needed.</p>`;
+      el.querySelector('.repair-summary').after(summary);
+    }
     $('#apply-repair').addEventListener('click', async () => {
       if (busy) return;
-      const check = checkSchedule(preview.volunteers, state.shifts, preview.schedule);
+      const check = checkSchedule(preview.volunteers, state.shifts, preview.schedule, { assignments: requested });
       if (!check.valid) { notify('Validation failed. Your original schedule is unchanged.', true); return; }
       if (currentEvent) {
         setBusy(true, $('#apply-repair'));
@@ -300,7 +310,7 @@ $$('.nav-item').forEach(button => button.addEventListener('click', () => showVie
 $('#request-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const request = $('#request-input').value.trim();
-  if (!request) { notify('Describe a change first, using a volunteer’s name and a time interval.', true); $('#request-input').focus(); return; }
+  if (!request) { notify('Describe an assignment or availability change using a volunteer’s name and a shift or time interval.', true); $('#request-input').focus(); return; }
   if (auth.configured && !auth.user) { $('#auth-message').textContent = 'Sign in to use Gemma and save your work.'; $('#auth-dialog').showModal(); return; }
   if (!connection.configured) { $('#connection-dialog').showModal(); return; }
   clearNotice(); preview = null; interpretation = null; renderPreview(); renderInterpretation(); setBusy(true, $('#interpret-button'));

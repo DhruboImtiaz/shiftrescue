@@ -58,7 +58,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const active = await cloud.session(req, res, true), id = action[1];
           if (action[2] === 'apply') {
             const proof = tokens.read(input.proposalId, active.user.id, id);
-            const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule);
+            const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule, { assignments: proof.assignments || [] });
             if (!check.valid) throw new AppError('The preview failed final validation.', 409);
             return send(200, await cloud.save(active, id, proof.version, proof.state, proof.activity));
           }
@@ -105,12 +105,14 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           if (stored && stored.version !== input.expectedVersion) throw new AppError('This event changed in another tab. Refresh the cloud copy before finding cover.', 409);
           const people = input.volunteers || stored?.state.volunteers, shifts = stored?.state.shifts || input.shifts, baseline = stored?.state.schedule || input.schedule;
           validateData(people, shifts, baseline);
-          const volunteers = applyChanges(people, input.changes || []);
-          const result = { ...repairSchedule(volunteers, shifts, baseline), volunteers };
+          const changes = input.changes || [];
+          const volunteers = applyChanges(people, changes, shifts);
+          const assignments = changes.filter(c => c.type === 'assign').map(({ volunteerId, shiftId }) => ({ type: 'assign', volunteerId, shiftId }));
+          const result = { ...repairSchedule(volunteers, shifts, baseline, { assignments }), volunteers, assignments };
           if (stored && result.schedule) {
             const text = typeof input.requestText === 'string' ? input.requestText.slice(0, 3000) : 'Volunteer schedule updated.';
             const source = ['gemma', 'scenario', 'team'].includes(input.source) ? input.source : 'team';
-            result.proposalId = tokens.issue({ userId: active.user.id, eventId: stored.id, version: stored.version, state: { ...stored.state, volunteers, schedule: result.schedule, history: [] }, activity: { kind: 'repair', title: `${result.changedAssignments} assignment${result.changedAssignments === 1 ? '' : 's'} changed · all constraints satisfied`, text, source, differences: result.differences } });
+            result.proposalId = tokens.issue({ userId: active.user.id, eventId: stored.id, version: stored.version, assignments, state: { ...stored.state, volunteers, schedule: result.schedule, history: [] }, activity: { kind: 'repair', title: `${result.changedAssignments} assignment${result.changedAssignments === 1 ? '' : 's'} changed · all constraints satisfied`, text, source, differences: result.differences } });
           }
           return send(200, result);
         }

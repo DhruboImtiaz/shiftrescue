@@ -78,7 +78,7 @@ test('both event setup and change interpretation retain their generation setting
     assert.deepEqual(generation.thinkingConfig, { thinkingLevel: 'minimal' });
     return generation.maxOutputTokens === 8192
       ? answer(JSON.stringify({ status: 'ready', message: 'Review the event.', questions: [], draft }))
-      : answer(JSON.stringify({ status: 'clarification', message: 'Fixed assignments are unsupported.', changes: [] }));
+      : answer(JSON.stringify({ status: 'clarification', message: 'Which shift time do you mean?', changes: [] }));
   });
   assert.equal((await interpretEventSetup(config, 'Set up a desk.', '2026-10-24')).status, 'ready');
   const change = await interpretRequest(config, 'Assign Nadia to a shift.', demo.volunteers, demo.shifts);
