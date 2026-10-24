@@ -8,6 +8,7 @@ export function initPhotoInput({ onChange, onState }) {
     inputs.forEach(input => { input.value = ''; });
     $('#setup-photo-preview').classList.add('hidden'); $('#setup-photo-image').removeAttribute('src');
     $('#setup-photo-name').textContent = ''; $('#setup-photo-message').textContent = '';
+    $('#setup-photo-message').classList.remove('success');
     if (notify) onChange();
   }
   async function choose(file) {
@@ -37,6 +38,7 @@ export function initPhotoInput({ onChange, onState }) {
       $('#setup-photo-image').src = url; $('#setup-photo-name').textContent = file.name || 'Camera photo';
       $('#setup-photo-preview').classList.remove('hidden');
       $('#setup-photo-message').textContent = 'Photo ready. Check that names and times are readable before creating the draft.';
+      $('#setup-photo-message').classList.add('success');
     } catch (error) {
       if (version === generation) $('#setup-photo-message').textContent = error.message.startsWith('Choose ') || error.message.startsWith('Crop ') || error.message.startsWith('This ') ? error.message : 'This image could not be read. Choose another photo or enter the details in text.';
     } finally {
