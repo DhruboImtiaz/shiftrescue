@@ -43,9 +43,10 @@ export function validateChanges(changes, volunteers, shifts = []) {
       if (parseTime(c.start) >= parseTime(c.end)) throw new Error('The unavailable interval must end after it starts.');
     } else if (c.type === 'max_hours') {
       if (!Number.isFinite(c.hours) || c.hours < 0 || c.hours > 24) throw new Error('Maximum hours must be a number between 0 and 24.');
-    } else if (c.type === 'assign') {
+    } else if (c.type === 'assign' || c.type === 'unassign') {
       if (!shifts.some(s => s.id === c.shiftId)) throw new Error('The request names an unknown shift. Please choose a shift in this event.');
-    } else throw new Error('Supported changes are shift assignments, unavailable time intervals and maximum working hours.');
+      if (changes.some(other => other?.volunteerId === c.volunteerId && other.shiftId === c.shiftId && other.type === (c.type === 'assign' ? 'unassign' : 'assign'))) throw new Error('The same volunteer cannot be both added to and removed from the same shift in one request.');
+    } else throw new Error('Supported changes are adding or removing shift assignments, unavailable time intervals and maximum working hours.');
   }
   return changes;
 }
@@ -69,23 +70,24 @@ export function applyChanges(volunteers, changes, shifts = []) {
 
 function validateAssignments(assignments, volunteers, shifts) {
   validateChanges(assignments, volunteers, shifts);
-  if (assignments.some(c => c.type !== 'assign')) throw new Error('Schedule assignment requirements must name a volunteer and a shift.');
+  if (assignments.some(c => !['assign', 'unassign'].includes(c.type))) throw new Error('Schedule assignment requirements must name a volunteer and a shift.');
 }
 
-export function checkSchedule(volunteers, shifts, schedule, { assignments = [] } = {}) {
+export function checkSchedule(volunteers, shifts, schedule, { assignments = [], allowPartial = false } = {}) {
   validateAssignments(assignments, volunteers, shifts);
-  const errors = [], workloads = Object.fromEntries(volunteers.map(p => [p.id, 0]));
+  const errors = [], warnings = [], workloads = Object.fromEntries(volunteers.map(p => [p.id, 0]));
   const personById = new Map(volunteers.map(p => [p.id, p]));
   for (const s of shifts) {
     const assigned = schedule[s.id] || [];
-    if (assigned.length !== s.required || new Set(assigned).size !== assigned.length) errors.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: needs ${s.required} different volunteers.`);
+    if (assigned.length > s.required || new Set(assigned).size !== assigned.length) errors.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: allows at most ${s.required} different volunteers.`);
+    if (assigned.length < s.required) warnings.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: ${s.required - assigned.length} of ${s.required} places still open.`);
     for (const id of assigned) {
       const p = personById.get(id);
       if (!p) { errors.push('An assigned volunteer does not exist.'); continue; }
       workloads[id] += (s.end - s.start) / 60;
       if (!available(p, s)) errors.push(`${p.name} is unavailable for ${s.station}, ${clock(s.start)}–${clock(s.end)}.`);
     }
-    for (const skill of s.skills) if (!assigned.some(id => personById.get(id)?.skills.includes(skill))) errors.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: missing ${skill} coverage.`);
+    for (const skill of s.skills) if (!assigned.some(id => personById.get(id)?.skills.includes(skill))) warnings.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: missing ${skill} coverage.`);
   }
   for (const p of volunteers) {
     if (workloads[p.id] > p.maxHours + 1e-8) errors.push(`${p.name} exceeds their ${p.maxHours}-hour limit.`);
@@ -94,9 +96,45 @@ export function checkSchedule(volunteers, shifts, schedule, { assignments = [] }
   }
   for (const c of assignments) {
     const shift = shifts.find(s => s.id === c.shiftId);
-    if (!(schedule[c.shiftId] || []).includes(c.volunteerId)) errors.push(`${personById.get(c.volunteerId).name} must be assigned to ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}.`);
+    const included = (schedule[c.shiftId] || []).includes(c.volunteerId);
+    if ((c.type === 'assign' && !included) || (c.type === 'unassign' && included)) errors.push(`${personById.get(c.volunteerId).name} must be ${c.type === 'assign' ? 'assigned to' : 'removed from'} ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}.`);
   }
-  return { valid: !errors.length, errors: [...new Set(errors)], workloads };
+  return { valid: !errors.length && (allowPartial || !warnings.length), complete: !errors.length && !warnings.length, errors: [...new Set(allowPartial ? errors : [...errors, ...warnings])], warnings: [...new Set(warnings)], workloads };
+}
+
+// Keep every placement that still fits after team/shift edits. Coverage gaps
+// are allowed; invalid individual assignments become open places.
+export function retainValidAssignments(volunteers, shifts, schedule) {
+  const next = Object.fromEntries(shifts.map(s => [s.id, []]));
+  const ids = new Set(volunteers.map(p => p.id));
+  for (const shift of shifts) for (const id of new Set(schedule[shift.id] || [])) {
+    if (!ids.has(id)) continue;
+    next[shift.id].push(id);
+    if (!checkSchedule(volunteers, shifts, next, { allowPartial: true }).valid) next[shift.id].pop();
+  }
+  return next;
+}
+
+function scheduleDifferences(shifts, baseline, schedule) {
+  return shifts.filter(s => schedule[s.id].some(id => !(baseline[s.id] || []).includes(id)) || (baseline[s.id] || []).some(id => !schedule[s.id].includes(id))).map(s => ({ shiftId: s.id, station: s.station, start: s.start, end: s.end, removed: (baseline[s.id] || []).filter(id => !schedule[s.id].includes(id)), added: schedule[s.id].filter(id => !(baseline[s.id] || []).includes(id)) }));
+}
+
+// Apply only the requested edits. Never fill unrelated shifts or reshuffle
+// other people just because the rest of the event is incomplete.
+export function editSchedule(people, shifts, baseline, changes) {
+  validateData(people, shifts, baseline);
+  const volunteers = applyChanges(people, changes, shifts);
+  const assignments = changes.filter(c => ['assign', 'unassign'].includes(c.type)).map(({ type, volunteerId, shiftId }) => ({ type, volunteerId, shiftId }));
+  let schedule = structuredClone(baseline);
+  // Removals happen first so moves and replacements are atomic, regardless
+  // of the order of operations returned by the model.
+  for (const c of assignments.filter(c => c.type === 'unassign')) schedule[c.shiftId] = schedule[c.shiftId].filter(id => id !== c.volunteerId);
+  if (changes.some(c => c.type === 'unavailable' || c.type === 'max_hours')) schedule = retainValidAssignments(volunteers, shifts, schedule);
+  for (const c of assignments.filter(c => c.type === 'assign')) if (!schedule[c.shiftId].includes(c.volunteerId)) schedule[c.shiftId].push(c.volunteerId);
+  const validation = checkSchedule(volunteers, shifts, schedule, { assignments, allowPartial: true });
+  if (!validation.valid) return { mode: 'incremental', status: 'conflict', schedule: null, diagnostics: validation.errors, volunteers, assignments };
+  const differences = scheduleDifferences(shifts, baseline, schedule);
+  return { mode: 'incremental', status: validation.complete ? 'feasible' : 'partial', complete: validation.complete, schedule, volunteers, assignments, changes: structuredClone(changes), differences, warnings: validation.warnings, openPlaces: shifts.reduce((n, s) => n + s.required - schedule[s.id].length, 0), changedAssignments: differences.reduce((n, d) => n + Math.max(d.added.length, d.removed.length), 0), workloads: validation.workloads };
 }
 
 function combinations(items, count, start = 0, chosen = [], result = []) {
@@ -113,12 +151,13 @@ export function repairSchedule(volunteers, shifts, baseline, { assignments = [],
   const begin = performance.now(), personById = new Map(volunteers.map(p => [p.id, p]));
   const diagnostics = [];
   const ordered = shifts.map(s => {
-    const requested = [...new Set(assignments.filter(c => c.shiftId === s.id).map(c => c.volunteerId))];
+    const requested = [...new Set(assignments.filter(c => c.type === 'assign' && c.shiftId === s.id).map(c => c.volunteerId))];
+    const excluded = new Set(assignments.filter(c => c.type === 'unassign' && c.shiftId === s.id).map(c => c.volunteerId));
     const eligible = volunteers.filter(p => available(p, s) && p.maxHours * 60 >= s.end - s.start);
     for (const skill of s.skills) if (!eligible.some(p => p.skills.includes(skill))) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: no available volunteer with ${skill} training and enough hours for this shift.`);
     if (eligible.length < s.required) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: ${eligible.length} eligible volunteers for ${s.required} places.`);
     const options = combinations(eligible.map(p => p.id), s.required)
-      .filter(ids => requested.every(id => ids.includes(id)) && s.skills.every(skill => ids.some(id => personById.get(id).skills.includes(skill))))
+      .filter(ids => requested.every(id => ids.includes(id)) && !ids.some(id => excluded.has(id)) && s.skills.every(skill => ids.some(id => personById.get(id).skills.includes(skill))))
       .map(ids => ({ ids, cost: (baseline[s.id] || []).filter(id => !ids.includes(id)).length }))
       .sort((a, b) => a.cost - b.cost);
     if (requested.length && !options.length) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: assigning ${requested.map(id => personById.get(id).name).join(', ')} cannot satisfy this shift’s staffing, availability, skills and hour limits.`);
@@ -156,6 +195,6 @@ export function repairSchedule(volunteers, shifts, baseline, { assignments = [],
   if (!best) return { status: interrupted ? 'search_limit' : 'infeasible', optimal: !interrupted, schedule: null, diagnostics: [interrupted ? 'The search limit was reached before a valid schedule was found. This does not prove the request is impossible.' : assignments.length ? 'The requested assignments conflict with availability, overlapping shifts, skill requirements or hour limits. Try changing the requested placements.' : 'Availability, overlapping shifts, skill requirements and hour limits cannot all be satisfied together. Try restoring availability or increasing an hour limit.'], nodes, elapsedMs: Math.round(performance.now() - begin) };
   const validation = checkSchedule(volunteers, shifts, best, { assignments });
   if (!validation.valid) throw new Error('Internal validation rejected the proposed schedule. The original schedule was preserved.');
-  const differences = shifts.filter(s => best[s.id].some(id => !(baseline[s.id] || []).includes(id)) || (baseline[s.id] || []).some(id => !best[s.id].includes(id))).map(s => ({ shiftId: s.id, station: s.station, start: s.start, end: s.end, removed: (baseline[s.id] || []).filter(id => !best[s.id].includes(id)), added: best[s.id].filter(id => !(baseline[s.id] || []).includes(id)) }));
+  const differences = scheduleDifferences(shifts, baseline, best);
   return { status: 'feasible', optimal: !interrupted, schedule: best, changedAssignments: bestCost, differences, workloads: validation.workloads, nodes, elapsedMs: Math.round(performance.now() - begin), diagnostics: [] };
 }

@@ -157,15 +157,16 @@ function cloudFixture(t) {
 
 test('cloud assignment preview stays unsaved until explicit apply, then survives a fresh load', async t => {
   const cloud = cloudFixture(t), api = createApi(env);
-  const response = await api(request('/api/repair', { eventId, expectedVersion: 1, changes: assignments, source: 'gemma', requestText: 'Assign s1 to a1 and s2 to c1.' }));
+  const changes = [{ type: 'unassign', volunteerId: 's3', shiftId: 'a1' }, { type: 'unassign', volunteerId: 's1', shiftId: 'c1' }, ...assignments];
+  const response = await api(request('/api/repair', { eventId, expectedVersion: 1, changes, source: 'gemma', requestText: 'Replace s3 with s1 on a1 and replace s1 with s2 on c1.' }));
   assert.equal(response.status, 200);
   const preview = await response.json();
   assert.deepEqual(preview.schedule, { a1: ['s1'], c1: ['s2'] });
-  assert.deepEqual(preview.assignments, assignments);
+  assert.deepEqual(preview.assignments, changes);
   assert.equal(cloud.saves.length, 0);
   assert.deepEqual(cloud.read().state.schedule, fixture().schedule);
   const proof = proposalTokens(secret).read(preview.proposalId, 'owner', eventId);
-  assert.deepEqual(proof.assignments, assignments);
+  assert.deepEqual(proof.assignments, changes);
   const applied = await createApi(env)(request(`/api/events/${eventId}/apply`, { proposalId: preview.proposalId }));
   assert.equal(applied.status, 200);
   assert.equal(cloud.saves.length, 1);

@@ -17,7 +17,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Start with zero volunteers and shifts, then create separate events with a name and date or copy a roster you have opened.
 - Add, edit and remove volunteers with custom skills, multiple availability windows and maximum daily hours.
 - Define shifts with staffing requirements and required skill coverage.
-- Save incomplete setups as explicit drafts, then generate a valid first schedule.
+- Save incomplete schedules and build them one volunteer at a time. Each shift has an Edit assignments button; completing the whole event is optional.
 
 ### Gemma-Powered Requests
 
@@ -25,11 +25,22 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Review and edit every extracted field, add or remove draft rows, and resolve missing details before saving a separate event to Supabase.
 - Generate assignments with the constraint engine after setup, then review and apply the schedule separately. Infeasible events remain editable drafts.
 - Interpret requests such as **“Nadia cannot work from 14:00 to 16:00.”**
-- Assign volunteers to existing shifts with requests such as **“Assign Nadia to Support desk 10:00–12:00, and Rahim to Registration 12:00–14:00.”** Review the named placements, then preview and apply a valid schedule. Conflicting placements never override availability, skills, staffing or hour limits.
-- Requested assignments apply to the current repair; later repairs can move volunteers when needed. Include the shift time when several shifts share a station name.
+- Add, remove, move or replace volunteers on existing shifts, for example **“Assign Nadia to Support desk 10:00–12:00,” “Move Nadia from Support desk to Registration,”** or **“Replace Nadia with Rahim on Registration.”** Review and save those changes without filling other shifts. Capacity, availability, overlaps and hour limits are enforced; missing staffing or skill coverage remains visible as a warning.
+- Only requested placements change; unrelated assignments are preserved. Moves and replacements are atomic. Include shift times when names are ambiguous. The optional Complete schedule action can fill remaining places or rebalance the event.
 - Support multiple unavailable intervals and maximum-hour changes in one message.
 - Ask for clarification instead of guessing ambiguous times or unknown people.
 - Validate structured model output before it reaches the scheduling engine.
+
+### Tap-to-Talk in English and Bengali
+
+- Use **Tap to talk** below either the event brief or **What changed?** Select **English**, **বাংলা (বাংলাদেশ)**, or **Auto detect** for mixed speech.
+- Allow microphone access, speak for up to 30 seconds, then choose **Stop & transcribe**. **Cancel recording** discards the recording without changing your text.
+- The transcript is appended to the editable text box. Check names and times before sending it to Gemma; voice input never interprets, assigns or saves automatically.
+- Google’s `gemini-3.5-transcribe` handles speech recognition with the existing private `GEMINI_API_KEY`; the configured Gemma model still interprets event and schedule requests. Model access and quota for transcription must be available on that Google connection.
+- Audio is sent to Google only after stopping a recording. ShiftRescue does not store audio, and requests use `store: false` in the transcription API. The selected event’s existing names and shift labels provide vocabulary hints after ownership is checked.
+- Recording requires microphone permission and a browser with `getUserMedia` and `MediaRecorder` over HTTPS (or localhost). Unsupported browsers and transcription failures keep typed input available. Audio is limited to 1 MiB; other JSON routes retain the existing 80 KB limit.
+
+Language support: [Google transcription model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe). Exact recognition depends on pronunciation, background noise and names; the transcript is always editable.
 - Review the interpretation and resulting repair separately before applying changes.
 
 ### Constraint-Based Scheduling
@@ -138,8 +149,9 @@ Tests cover scheduling rules, fairness, search budgets, model-response validatio
 2. Include the event name/date, named volunteers with skills, availability and maximum hours, plus each shift’s time, staffing count and required skills.
 3. Choose **Create draft with Gemma**. Unknown details remain blank; clarification questions appear above the editable draft.
 4. Correct the draft, explicitly enter `none` where no skills or availability are intended, and resolve any questions.
-5. Choose **Create event & preview schedule**. This saves a new event with no assignments, then checks coverage with the deterministic scheduler.
-6. Review the proposal and choose **Apply repair** to save assignments. If coverage is impossible, adjust the saved team or shifts and generate again.
+5. Choose **Create event**. The new event is saved with open shifts.
+6. Use a shift’s **Edit assignments** button, or describe an assignment in **What changed?** Choose **Preview changes → Save changes**. Other shifts can remain unfilled, even if a complete schedule is currently impossible.
+7. Optionally choose **Complete schedule → Apply complete schedule** to ask the constraint engine to fill the entire event.
 
 Example brief:
 
@@ -194,9 +206,9 @@ Confirm signup emails when required, then return to the app and sign in. Account
 
 1. `/api/auth/session` should report `configured: true` for Supabase.
 2. `/api/status` should report `configured: true` for Gemma, without exposing a key.
-3. Sign in, create an event, add a volunteer and shift, generate a schedule and apply it.
+3. Sign in, create an event with several shifts, and save one volunteer to one shift while the others remain open.
 4. Reload the page and confirm the event is restored.
-5. Send a real Gemma request, review the interpretation, then preview and apply the repair.
+5. Send a real Gemma add, remove or move request, review the proposed edits, then preview and save. Confirm unrelated placements are preserved.
 
 If sign-in says **“Supabase has not been configured on the server,”** check both Supabase environment variables in the production Functions scope, then redeploy. Do not fix this by adding credentials to source code. A missing Gemma key affects natural-language requests; a missing signing secret prevents cloud repair previews from being accepted.
 
@@ -209,7 +221,7 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 - **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in starts with an empty workspace; saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
 - **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
 - **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
-- **Accepted schedules:** Cloud saves are transactional and version-checked. Unconfirmed or failed repair requests preserve the accepted event. Setup edits that break coverage clear assignments into a draft until a valid schedule is generated.
+- **Saved assignments:** Cloud saves are transactional and version-checked. Partial schedules can be saved; staffing and skill gaps remain visible until filled. Unconfirmed or failed edits preserve the saved event. Team/shift edits keep unaffected placements and reopen only assignments that no longer fit. Full schedule generation remains a separate action.
 - **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
 - **Credentials:** Private environment files, credentials, local caches, dependencies, generated builds and backup artifacts are excluded by `.gitignore`. `.env.example` contains placeholders only. Never commit API keys or a Supabase service-role key.
 
@@ -218,7 +230,7 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 ## Roadmap / Known Limitations
 
 - Each event supports **12 volunteers, 8 shifts and 1–3 people per shift** on one day in **Asia/Dhaka**.
-- Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 changes**: shift assignments, unavailability and maximum-hour changes.
+- Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 operations**: adding/removing shift assignments, unavailability and maximum-hour changes. Moves and replacements use a removal plus an addition.
 - Setup supports one day in Dhaka, exact shift intervals, staffing and collective skill coverage. Create the event first, then request named shift assignments in **What changed?** Required breaks, travel time, permanent assignment locks, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
 - Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
 - Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.

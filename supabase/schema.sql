@@ -96,7 +96,7 @@ returns jsonb language sql stable security invoker set search_path = '' as $$
 $$;
 
 -- Row locking via version-checked UPDATE prevents stale tabs overwriting new work.
--- Everything below succeeds or rolls back together; no partial rota is published.
+-- Everything below succeeds or rolls back together; no half-written event is visible.
 create function public.shiftrescue_save_event(p_event_id uuid, p_expected_version bigint, p_state jsonb, p_activity jsonb default null)
 returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare

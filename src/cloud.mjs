@@ -7,9 +7,8 @@ export class AppError extends Error {
 export function validateEventState(state) {
   if (!state || typeof state.event !== 'string' || !state.event.trim() || state.event.length > 100 || typeof state.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.date) || !Number.isFinite(Date.parse(state.date)) || new Date(state.date).toISOString().slice(0, 10) !== state.date || state.timezone !== 'Asia/Dhaka') throw new AppError('Provide an event name, a valid date and the Asia/Dhaka timezone.');
   validateData(state.volunteers, state.shifts, state.schedule, { allowEmpty: true });
-  const validation = checkSchedule(state.volunteers, state.shifts, state.schedule);
-  const draft = Object.values(state.schedule).every(ids => ids.length === 0);
-  if (!validation.valid && !draft) throw new AppError(`A schedule cannot be saved while its rules are broken: ${validation.errors[0]}`);
+  const validation = checkSchedule(state.volunteers, state.shifts, state.schedule, { allowPartial: true });
+  if (!validation.valid) throw new AppError(`A schedule cannot be saved while its rules are broken: ${validation.errors[0]}`);
   return state;
 }
 export function readCookies(header = '') {
