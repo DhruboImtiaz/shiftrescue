@@ -1,5 +1,6 @@
 import { checkSchedule, clock, parseTime, retainValidAssignments, validateData } from '/scheduler.mjs';
 import { initEventSetup } from '/event-setup.js';
+import { initVoiceInputs } from '/voice.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -26,7 +27,7 @@ $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
 let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
 let editingShiftId = null, editingAssignmentsShiftId = null, editingEvent = false, gemmaIssue = null;
-let eventSetup;
+let eventSetup, voiceInputs;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
 const storageKey = 'shiftrescue-draft-v2';
@@ -42,8 +43,8 @@ function clearWorkspace() {
   try { sessionStorage.removeItem('shiftrescue-request-draft'); } catch {}
 }
 
-async function api(path, data) {
-  const response = await fetch(path, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+async function api(path, data, { signal } = {}) {
+  const response = await fetch(path, data === undefined ? { signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal });
   const result = await response.json().catch(() => ({ error: response.status === 429 ? 'The site is receiving too many requests. Please wait before retrying.' : 'The server could not respond. Please retry.' }));
   if (!response.ok) { const error = new Error(result.error || 'Something went wrong. Please retry.'); error.status = response.status; error.quota = result.quota; throw error; }
   return result;
@@ -65,6 +66,7 @@ function setBusy(value, button = null) {
   $$('.button.busy').forEach(b => b.classList.remove('busy'));
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
+  voiceInputs?.refresh();
 }
 function renderConnection() {
   $('#connection-label').textContent = connection.verified ? 'Gemma connected' : connection.configured ? connection.managed ? 'Gemma configured' : 'Verify Gemma connection' : 'Connect Gemma';
@@ -442,6 +444,11 @@ eventSetup = initEventSetup({
     finally { setBusy(false); }
     notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full rota.');
   }
+});
+voiceInputs = initVoiceInputs({
+  api, context: () => ({ auth, connection, busy, eventId: currentEvent?.id }), setBusy,
+  requestSignIn() { $('#setup-dialog').close(); $('#auth-message').textContent = 'Sign in to use voice input.'; $('#auth-dialog').showModal(); },
+  requestConnection() { $('#setup-dialog').close(); $('#connection-dialog').showModal(); }
 });
 async function init() {
   if (/access_token=|refresh_token=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);

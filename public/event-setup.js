@@ -54,7 +54,7 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
     const box = $('#setup-review-issues');
     try {
       const { issues } = reviewSetupDraft(readDraft());
-      box.innerHTML = issues.length ? `<strong>Complete these details before creating the event:</strong><ul>${issues.map(issue => `<li>${escape(issue)}</li>`).join('')}</ul>` : '<strong>All required fields are complete.</strong> Review the details below, then create the event and preview its schedule.';
+      box.innerHTML = issues.length ? `<strong>Complete these details before creating the event:</strong><ul>${issues.map(issue => `<li>${escape(issue)}</li>`).join('')}</ul>` : '<strong>All required fields are complete.</strong> Review the details below, then create the event. You can fill shifts one at a time.';
       box.classList.toggle('complete', !issues.length);
       return issues.length === 0;
     } catch (error) { box.textContent = error.message; box.classList.remove('complete'); return false; }

@@ -30,6 +30,17 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Support multiple unavailable intervals and maximum-hour changes in one message.
 - Ask for clarification instead of guessing ambiguous times or unknown people.
 - Validate structured model output before it reaches the scheduling engine.
+
+### Tap-to-Talk in English and Bengali
+
+- Use **Tap to talk** below either the event brief or **What changed?** Select **English**, **বাংলা (বাংলাদেশ)**, or **Auto detect** for mixed speech.
+- Allow microphone access, speak for up to 30 seconds, then choose **Stop & transcribe**. **Cancel recording** discards the recording without changing your text.
+- The transcript is appended to the editable text box. Check names and times before sending it to Gemma; voice input never interprets, assigns or saves automatically.
+- Google’s `gemini-3.5-transcribe` handles speech recognition with the existing private `GEMINI_API_KEY`; the configured Gemma model still interprets event and schedule requests. Model access and quota for transcription must be available on that Google connection.
+- Audio is sent to Google only after stopping a recording. ShiftRescue does not store audio, and requests use `store: false` in the transcription API. The selected event’s existing names and shift labels provide vocabulary hints after ownership is checked.
+- Recording requires microphone permission and a browser with `getUserMedia` and `MediaRecorder` over HTTPS (or localhost). Unsupported browsers and transcription failures keep typed input available. Audio is limited to 1 MiB; other JSON routes retain the existing 80 KB limit.
+
+Language support: [Google transcription model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe). Exact recognition depends on pronunciation, background noise and names; the transcript is always editable.
 - Review the interpretation and resulting repair separately before applying changes.
 
 ### Constraint-Based Scheduling

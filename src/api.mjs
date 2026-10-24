@@ -4,6 +4,7 @@ import { callGemma, interpretRequest, interpretEventSetup, validateModel } from 
 import { compileSetupDraft } from './setup.mjs';
 import { cloudService, AppError, safeUser, validateEventState } from './cloud.mjs';
 import { proposalTokens } from './proposals.mjs';
+import { transcribeVoice, validateVoiceInput } from './voice.mjs';
 
 export const securityHeaders = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
@@ -39,11 +40,19 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (request.headers.get('origin') && request.headers.get('origin') !== url.origin) throw new AppError('Requests must come from this app.', 403);
         if (request.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('Cross-site requests are not allowed.', 403);
         if (!String(request.headers.get('content-type') || '').startsWith('application/json')) throw new AppError('Expected an application/json request.', 415);
-        if (Number(request.headers.get('content-length')) > 80000) throw new AppError('Request is too large.', 413);
+        const bodyLimit = pathname === '/api/voice/transcribe' ? 1450000 : 80000;
+        if (Number(request.headers.get('content-length')) > bodyLimit) throw new AppError('Request is too large.', 413);
         const reader = request.body?.getReader(); let size = 0; const chunks = [];
-        if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > 80000) { await reader.cancel(); throw new AppError('Request is too large.', 413); } chunks.push(Buffer.from(chunk.value)); }
+        if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > bodyLimit) { await reader.cancel(); throw new AppError('Request is too large.', 413); } chunks.push(Buffer.from(chunk.value)); }
         let input; try { input = JSON.parse(Buffer.concat(chunks).toString()); } catch { throw new AppError('Invalid JSON request.'); }
         if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('Expected a JSON object.');
+        if (pathname === '/api/voice/transcribe') {
+          const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;
+          validateVoiceInput(input);
+          const stored = input.eventId ? await cloud.load(active, input.eventId) : null;
+          const vocabulary = stored ? [...stored.state.volunteers.flatMap(p => [p.name, p.id]), ...stored.state.shifts.flatMap(s => [s.station, s.id])] : [];
+          return send(200, await transcribeVoice(config, input, vocabulary));
+        }
         if (pathname === '/api/auth/signin' || pathname === '/api/auth/signup') return send(200, await cloud.login(input, res, pathname.endsWith('/signup')));
         if (pathname === '/api/auth/signout') { await cloud.logout(req, res); return send(200, { signedOut: true }); }
         if (pathname === '/api/events') {
