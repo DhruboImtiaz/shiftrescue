@@ -1,4 +1,4 @@
-import { parseTime, validateData } from './scheduler.mjs';
+import { parseTime, validateData, checkSchedule } from './scheduler.mjs';
 
 // Shared by the model boundary, review form and save endpoint. Unknown is null;
 // [] means the coordinator explicitly recorded no skills / no availability.
@@ -37,7 +37,11 @@ export function reviewSetupDraft(input) {
       return { station: text(s.station, 80), start: time(s.start), end: time(s.end), required: number(s.required, 3, true), skills: skills(s.skills) };
     })
   };
+  const assignments = input.assignments ?? [];
+  if (!Array.isArray(assignments) || assignments.length > 24 || assignments.some(a => !object(a) || !Number.isInteger(a.volunteerIndex) || a.volunteerIndex < 0 || a.volunteerIndex >= draft.volunteers.length || !Number.isInteger(a.shiftIndex) || a.shiftIndex < 0 || a.shiftIndex >= draft.shifts.length)) invalid();
+  draft.assignments = assignments.map(({ volunteerIndex, shiftIndex }) => ({ volunteerIndex, shiftIndex }));
   const issues = [];
+  if (new Set(assignments.map(a => `${a.volunteerIndex}:${a.shiftIndex}`)).size !== assignments.length) issues.push('Remove duplicate shift assignments.');
   if (!draft.event) issues.push('Add an event name.');
   if (!draft.date) issues.push('Choose an event date.');
   else if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date) || !Number.isFinite(Date.parse(draft.date)) || new Date(draft.date).toISOString().slice(0, 10) !== draft.date) issues.push('Choose a valid event date.');
@@ -72,5 +76,9 @@ export function compileSetupDraft(input) {
   const volunteers = draft.volunteers.map((p, i) => ({ ...p, id: `v-${i + 1}`, color: colors[i % colors.length], availability: p.availability.map(a => a.map(parseTime)) }));
   const shifts = draft.shifts.map((s, i) => ({ ...s, id: `s-${i + 1}`, start: parseTime(s.start), end: parseTime(s.end) }));
   validateData(volunteers, shifts);
-  return { event: draft.event, date: draft.date, timezone: 'Asia/Dhaka', volunteers, shifts, schedule: Object.fromEntries(shifts.map(s => [s.id, []])), history: [] };
+  const schedule = Object.fromEntries(shifts.map(s => [s.id, []]));
+  for (const a of draft.assignments) schedule[shifts[a.shiftIndex].id].push(volunteers[a.volunteerIndex].id);
+  const check = checkSchedule(volunteers, shifts, schedule, { allowPartial: true });
+  if (!check.valid) throw new Error(check.errors.join(' '));
+  return { event: draft.event, date: draft.date, timezone: 'Asia/Dhaka', volunteers, shifts, schedule, history: [] };
 }

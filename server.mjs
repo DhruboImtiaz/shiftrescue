@@ -21,6 +21,7 @@ const assets = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/ap
 assets.set('/setup.mjs', ['../src/setup.mjs', 'text/javascript; charset=utf-8']);
 assets.set('/event-setup.js', ['event-setup.js', 'text/javascript; charset=utf-8']);
 assets.set('/voice.js', ['voice.js', 'text/javascript; charset=utf-8']);
+assets.set('/photo.js', ['photo.js', 'text/javascript; charset=utf-8']);
 const server = http.createServer(async (req, res) => {
   try {
     const host = req.headers.host;

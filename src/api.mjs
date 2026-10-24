@@ -40,7 +40,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (request.headers.get('origin') && request.headers.get('origin') !== url.origin) throw new AppError('Requests must come from this app.', 403);
         if (request.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('Cross-site requests are not allowed.', 403);
         if (!String(request.headers.get('content-type') || '').startsWith('application/json')) throw new AppError('Expected an application/json request.', 415);
-        const bodyLimit = pathname === '/api/voice/transcribe' ? 1450000 : 80000;
+        const bodyLimit = pathname === '/api/setup/photo' ? 2900000 : pathname === '/api/voice/transcribe' ? 1450000 : 80000;
         if (Number(request.headers.get('content-length')) > bodyLimit) throw new AppError('Request is too large.', 413);
         const reader = request.body?.getReader(); let size = 0; const chunks = [];
         if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > bodyLimit) { await reader.cancel(); throw new AppError('Request is too large.', 413); } chunks.push(Buffer.from(chunk.value)); }
@@ -87,17 +87,19 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           await callGemma(config, 'Reply with the single word READY.'); verified = true;
           return send(200, { configured: true, verified, model: config.model });
         }
-        if (pathname === '/api/setup/interpret') {
+        if (pathname === '/api/setup/interpret' || pathname === '/api/setup/photo') {
           if (cloud.configured || hosted) await cloud.session(req, res, true);
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-          const result = await interpretEventSetup(config, input.request, today);
+          const photo = pathname.endsWith('/photo');
+          if (photo && !input.image) throw new AppError('Choose a photo of your event or roster.');
+          const result = await interpretEventSetup(config, photo ? input.request ?? '' : input.request, today, photo ? { image: input.image } : {});
           verified = true; return send(200, result);
         }
         if (pathname === '/api/setup/create') {
           const active = await cloud.session(req, res, true);
           const state = compileSetupDraft(input.draft);
           validateEventState(state);
-          return send(201, await cloud.save(active, null, 0, state, { kind: 'setup', title: 'Event created from reviewed Gemma draft', text: 'The coordinator reviewed the event, volunteers and shifts before saving. Assignments are generated and reviewed separately.', source: 'gemma', differences: [] }));
+          return send(201, await cloud.save(active, null, 0, state, { kind: 'setup', title: 'Event created from reviewed Gemma draft', text: 'The coordinator reviewed the event, volunteers, shifts and any imported assignments before saving.', source: 'gemma', differences: [] }));
         }
         if (pathname === '/api/interpret') {
           const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;

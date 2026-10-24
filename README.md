@@ -21,9 +21,9 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 
 ### Gemma-Powered Requests
 
-- Create a new event from a description of its name, date, volunteers, skills, availability, hour limits and shift requirements.
+- Create a new event from a description or roster photo with its name, date, volunteers, skills, availability, hour limits, shifts and explicit assignments.
 - Review and edit every extracted field, add or remove draft rows, and resolve missing details before saving a separate event to Supabase.
-- Generate assignments with the constraint engine after setup, then review and apply the schedule separately. Infeasible events remain editable drafts.
+- Review imported assignments during setup, or add assignments afterward. Complete schedule remains optional; incomplete events stay editable.
 - Interpret requests such as **“Nadia cannot work from 14:00 to 16:00.”**
 - Add, remove, move or replace volunteers on existing shifts, for example **“Assign Nadia to Support desk 10:00–12:00,” “Move Nadia from Support desk to Registration,”** or **“Replace Nadia with Rahim on Registration.”** Review and save those changes without filling other shifts. Capacity, availability, overlaps and hour limits are enforced; missing staffing or skill coverage remains visible as a warning.
 - Only requested placements change; unrelated assignments are preserved. Moves and replacements are atomic. Include shift times when names are ambiguous. The optional Complete schedule action can fill remaining places or rebalance the event.
@@ -38,7 +38,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - The transcript is appended to the editable text box. Check names and times before sending it to Gemma; voice input never interprets, assigns or saves automatically.
 - Google’s `gemini-3.5-transcribe` handles speech recognition with the existing private `GEMINI_API_KEY`; the configured Gemma model still interprets event and schedule requests. Model access and quota for transcription must be available on that Google connection.
 - Audio is sent to Google only after stopping a recording. ShiftRescue does not store audio, and requests use `store: false` in the transcription API. The selected event’s existing names and shift labels provide vocabulary hints after ownership is checked.
-- Recording requires microphone permission and a browser with `getUserMedia` and `MediaRecorder` over HTTPS (or localhost). Unsupported browsers and transcription failures keep typed input available. Audio is limited to 1 MiB; other JSON routes retain the existing 80 KB limit.
+- Recording requires microphone permission and a browser with `getUserMedia` and `MediaRecorder` over HTTPS (or localhost). Unsupported browsers and transcription failures keep typed input available. Audio is limited to 1 MiB. The photo route has its own image limit; other JSON routes retain the existing 80 KB limit.
 
 Language support: [Google transcription model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe). Exact recognition depends on pronunciation, background noise and names; the transcript is always editable.
 - Review the interpretation and resulting repair separately before applying changes.
@@ -145,11 +145,11 @@ Tests cover scheduling rules, fairness, search budgets, model-response validatio
 
 ### Create an Event with Gemma
 
-1. Sign in and choose **Describe event with Gemma**.
+1. Sign in and choose **Create from text or photo**.
 2. Include the event name/date, named volunteers with skills, availability and maximum hours, plus each shift’s time, staffing count and required skills.
 3. Choose **Create draft with Gemma**. Unknown details remain blank; clarification questions appear above the editable draft.
 4. Correct the draft, explicitly enter `none` where no skills or availability are intended, and resolve any questions.
-5. Choose **Create event**. The new event is saved with open shifts.
+5. Review the assignment preview, then choose **Create event**. The new event is saved with your selected assignments; other places can stay open.
 6. Use a shift’s **Edit assignments** button, or describe an assignment in **What changed?** Choose **Preview changes → Save changes**. Other shifts can remain unfilled, even if a complete schedule is currently impossible.
 7. Optionally choose **Complete schedule → Apply complete schedule** to ask the constraint engine to fill the entire event.
 
@@ -157,7 +157,21 @@ Example brief:
 
 > Campus Help Day on 20 October 2026. Nadia has first-aid training; Rahim has no special skills. Both are available 10:00–14:00, maximum 4 hours each. Support desk: 10:00–12:00 and 12:00–14:00, one person per shift with first-aid coverage. Registration: the same two blocks, one person per shift, no special skills required.
 
-Setup never overwrites the selected event. Editing the description invalidates its previous model draft, so generate a fresh draft before saving. Model output is validated on the server; reviewed fields are validated again before the cloud write. No database migration or additional environment variable is needed for this feature.
+Setup never overwrites the selected event. Editing the description or changing/removing its photo invalidates the previous model draft, so generate a fresh draft before saving. Model output is validated on the server; reviewed fields and imported assignments are validated again before the cloud write. No database migration or additional environment variable is needed for this feature.
+
+### Create an event from a photo
+
+Choose **Create from text or photo**, then **Upload photo** or **Take photo**. On supported mobile devices, Take photo opens the camera; on other devices it may open a file picker. Use a clear JPG, PNG or WebP image of a roster, timetable or event poster. Export HEIC photos as JPG first. One image per draft is supported, with optional text or voice notes to clarify the image.
+
+The browser accepts source images up to 20 MiB, applies their orientation and re-encodes them as JPEG (up to 2,400 pixels on the longest side, 2 MiB). This removes original file metadata. The selected photo stays in browser memory; it is sent to Google's image-capable Gemma 4 model only when **Create draft with Gemma** is pressed. ShiftRescue does not store the original image in browser storage, event state or its database. Google processes the submitted image under the existing Google connection's applicable data terms. No public image URLs or Files API uploads are used.
+
+Gemma extracts event/date, volunteers, availability, hour limits, skills, shifts and explicit assignments from English, Bengali or mixed content. Unknown or illegible fields stay blank and require review. A written assignment does not establish broader availability or an hour limit. Handwriting and ambiguous table layouts need particular care; recognition is not guaranteed. A non-roster image should produce clarification rather than invented event data.
+
+The review includes editable assignment checkboxes and a partial schedule preview. Capacity, availability, overlapping shifts and hour limits block invalid imports. Open places and missing collective skill coverage are warnings, so a valid partial schedule can be created. Creating a draft never saves or overwrites an event; **Create event** saves only the reviewed fields and selected assignments as a new event.
+
+The authenticated `/api/setup/photo` endpoint alone accepts up to 2.9 MB of JSON, with a 2 MiB decoded image limit and base64/type/signature validation. Other setup endpoints retain their 80 KB request limit. Image interpretation shares Gemma's quota, retry and error handling with text requests.
+
+Photo production check: select a clear roster with known placements, generate and edit its preview, create the separate event, then reload and reopen it. Confirm extracted names/times and placements match the source; leave at least one shift place open to verify partial saving. Also try a missing-detail image, a rejected file type and Remove photo. Test camera capture on the target phone/browser after deployment.
 
 ---
 

@@ -145,7 +145,7 @@ function renderBoard() {
   $$('.edit-assignments').forEach(button => button.addEventListener('click', () => openAssignmentEditor(button.dataset.shift)));
   $('#empty-create-event')?.addEventListener('click', () => $('#new-event').click());
   if (!currentEvent && !state.shifts.length) {
-    const button = document.createElement('button'); button.className = 'button subtle'; button.textContent = 'Describe your event with Gemma';
+    const button = document.createElement('button'); button.className = 'button subtle'; button.textContent = 'Create from text or photo';
     button.addEventListener('click', () => eventSetup.open()); $('#schedule-board .empty-state').append(button);
   }
 }
