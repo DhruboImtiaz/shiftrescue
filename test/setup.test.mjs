@@ -53,7 +53,7 @@ test('drafts reject duplicate names, invalid dates, reversed intervals and capac
     d => { d.shifts[0].start = 'after 2'; }
   ]) { const input = draft(); mutate(input); assert.throws(() => compileSetupDraft(input)); }
 });
-test('model supplied IDs, assignments, histories and foreign timezones never become saved state', () => {
+test('model supplied IDs, raw schedules, histories and foreign timezones never become saved state', () => {
   const input = { ...draft(), timezone: 'Europe/London', schedule: { 's-1': ['admin'] }, history: [{ title: 'forged' }], ownerId: 'another-user' };
   input.volunteers[0].id = 'admin';
   const state = compileSetupDraft(input);

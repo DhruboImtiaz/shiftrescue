@@ -145,7 +145,7 @@ function renderBoard() {
   $$('.edit-assignments').forEach(button => button.addEventListener('click', () => openAssignmentEditor(button.dataset.shift)));
   $('#empty-create-event')?.addEventListener('click', () => $('#new-event').click());
   if (!currentEvent && !state.shifts.length) {
-    const button = document.createElement('button'); button.className = 'button subtle'; button.textContent = 'Describe your event with Gemma';
+    const button = document.createElement('button'); button.className = 'button subtle'; button.textContent = 'Create from text or photo';
     button.addEventListener('click', () => eventSetup.open()); $('#schedule-board .empty-state').append(button);
   }
 }
@@ -442,7 +442,7 @@ eventSetup = initEventSetup({
     setBusy(true); adoptCloud(saved); showView('board');
     try { await refreshEventList(); } catch { notify('The event was saved, but the event list could not refresh. Reload the page if needed.', true); }
     finally { setBusy(false); }
-    notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full rota.');
+    notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full schedule.');
   }
 });
 voiceInputs = initVoiceInputs({

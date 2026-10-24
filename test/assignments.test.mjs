@@ -16,7 +16,7 @@ const assignments = [assign('s1', 'a1'), assign('s2', 'c1')];
 const request = (path, body) => new Request(`https://shiftrescue.netlify.app${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', cookie: 'sr_access=test-access' }, body: JSON.stringify(body) });
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
-test('requested placements override the minimum-change preference without mutating the accepted rota', () => {
+test('requested placements override the minimum-change preference without mutating the accepted schedule', () => {
   const state = fixture(), before = structuredClone(state);
   const result = repairSchedule(state.volunteers, state.shifts, state.schedule, { assignments });
   assert.equal(result.status, 'feasible');
@@ -92,7 +92,7 @@ test('group shifts accept several requested volunteers and ignore repeated ident
   assert.deepEqual(new Set(result.schedule.a1), new Set(['s1', 's2']));
 });
 
-test('final validation detects an otherwise valid rota that omits a requested placement', () => {
+test('final validation detects an otherwise valid schedule that omits a requested placement', () => {
   const state = fixture();
   assert.ok(checkSchedule(state.volunteers, state.shifts, state.schedule).valid);
   const result = checkSchedule(state.volunteers, state.shifts, state.schedule, { assignments });
