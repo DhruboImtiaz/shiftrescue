@@ -38,9 +38,10 @@ test('an empty event is a valid saved draft, and real shifts can be generated la
   const solved = repairSchedule(next.volunteers, next.shifts, next.schedule);
   assert.ok(checkSchedule(next.volunteers, next.shifts, solved.schedule).valid);
 });
-test('removing an assigned person converts broken coverage to an explicit draft', () => {
+test('removing an assigned person preserves unaffected assignments in a partial schedule', () => {
   const next = normalizeSetup({ ...demo, volunteers: demo.volunteers.filter(p => p.id !== 'nadia') });
-  assert.ok(Object.values(next.schedule).every(ids => ids.length === 0));
+  assert.ok(Object.values(next.schedule).some(ids => ids.length > 0));
+  assert.ok(Object.values(next.schedule).every(ids => !ids.includes('nadia')));
   assert.ok(!checkSchedule(next.volunteers, next.shifts, next.schedule).valid);
 });
 test('signed previews survive separate function instances and bind owner, event, version and expiry', () => {

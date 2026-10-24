@@ -1,5 +1,5 @@
 import { demo, scenarios } from './demo.mjs';
-import { applyChanges, checkSchedule, repairSchedule, validateData } from './scheduler.mjs';
+import { editSchedule, checkSchedule, repairSchedule, retainValidAssignments, validateChanges, validateData } from './scheduler.mjs';
 import { callGemma, interpretRequest, interpretEventSetup, validateModel } from './gemma.mjs';
 import { compileSetupDraft } from './setup.mjs';
 import { cloudService, AppError, safeUser, validateEventState } from './cloud.mjs';
@@ -16,8 +16,7 @@ export function normalizeSetup(input) {
   validateData(next.volunteers, next.shifts, null, { allowEmpty: true });
   const ids = new Set(next.volunteers.map(p => p.id));
   next.schedule = Object.fromEntries(next.shifts.map(s => [s.id, [...new Set((next.schedule?.[s.id] || []).filter(id => ids.has(id)))].slice(0, s.required)]));
-  // An incomplete setup is an explicit empty draft, never a partly valid rota.
-  if (!checkSchedule(next.volunteers, next.shifts, next.schedule).valid) next.schedule = Object.fromEntries(next.shifts.map(s => [s.id, []]));
+  next.schedule = retainValidAssignments(next.volunteers, next.shifts, next.schedule);
   validateEventState(next);
   return next;
 }
@@ -58,13 +57,13 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const active = await cloud.session(req, res, true), id = action[1];
           if (action[2] === 'apply') {
             const proof = tokens.read(input.proposalId, active.user.id, id);
-            const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule, { assignments: proof.assignments || [] });
+            const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule, { assignments: proof.assignments || [], allowPartial: proof.mode === 'incremental' });
             if (!check.valid) throw new AppError('The preview failed final validation.', 409);
             return send(200, await cloud.save(active, id, proof.version, proof.state, proof.activity));
           }
           await cloud.load(active, id);
           const state = normalizeSetup(input.state);
-          return send(200, await cloud.save(active, id, input.expectedVersion, state, { kind: 'setup', title: 'Event setup updated', text: 'Volunteer, shift or event settings changed. Uncovered schedules are saved as drafts until a valid rota is generated.', source: 'team', differences: [] }));
+          return send(200, await cloud.save(active, id, input.expectedVersion, state, { kind: 'setup', title: 'Event setup updated', text: 'Volunteer, shift or event settings changed. Unaffected assignments were kept; any invalid placements became open places.', source: 'team', differences: [] }));
         }
         if (pathname === '/api/connection') {
           if (hosted || cloud.configured || !saveConnection) throw new AppError('The Gemma key is managed in the server’s private environment settings.', 403);
@@ -95,8 +94,9 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;
           const stored = input.eventId ? await cloud.load(active, input.eventId) : null;
           const people = stored?.state.volunteers || input.volunteers, shifts = stored?.state.shifts || input.shifts;
-          validateData(people, shifts);
-          const result = await interpretRequest(config, input.request, people, shifts, stored?.state.date || input.date || demo.date);
+          const schedule = stored?.state.schedule || input.schedule || Object.fromEntries(shifts.map(s => [s.id, []]));
+          validateData(people, shifts, schedule);
+          const result = await interpretRequest(config, input.request, people, shifts, stored?.state.date || input.date || demo.date, schedule);
           verified = true; return send(200, result);
         }
         if (pathname === '/api/repair') {
@@ -105,14 +105,14 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           if (stored && stored.version !== input.expectedVersion) throw new AppError('This event changed in another tab. Refresh the cloud copy before finding cover.', 409);
           const people = input.volunteers || stored?.state.volunteers, shifts = stored?.state.shifts || input.shifts, baseline = stored?.state.schedule || input.schedule;
           validateData(people, shifts, baseline);
-          const changes = input.changes || [];
-          const volunteers = applyChanges(people, changes, shifts);
-          const assignments = changes.filter(c => c.type === 'assign').map(({ volunteerId, shiftId }) => ({ type: 'assign', volunteerId, shiftId }));
-          const result = { ...repairSchedule(volunteers, shifts, baseline, { assignments }), volunteers, assignments };
+          const changes = input.changes ?? [];
+          validateChanges(changes, people, shifts);
+          const result = changes.length ? editSchedule(people, shifts, baseline, changes) : { ...repairSchedule(people, shifts, baseline), mode: 'complete', volunteers: people, assignments: [] };
+          const { volunteers, assignments } = result;
           if (stored && result.schedule) {
             const text = typeof input.requestText === 'string' ? input.requestText.slice(0, 3000) : 'Volunteer schedule updated.';
             const source = ['gemma', 'scenario', 'team'].includes(input.source) ? input.source : 'team';
-            result.proposalId = tokens.issue({ userId: active.user.id, eventId: stored.id, version: stored.version, assignments, state: { ...stored.state, volunteers, schedule: result.schedule, history: [] }, activity: { kind: 'repair', title: `${result.changedAssignments} assignment${result.changedAssignments === 1 ? '' : 's'} changed · all constraints satisfied`, text, source, differences: result.differences } });
+            result.proposalId = tokens.issue({ userId: active.user.id, eventId: stored.id, version: stored.version, mode: result.mode, assignments, state: { ...stored.state, volunteers, schedule: result.schedule, history: [] }, activity: { kind: 'repair', title: `${result.changedAssignments} assignment${result.changedAssignments === 1 ? '' : 's'} updated${result.mode === 'incremental' ? result.complete ? ' · schedule complete' : ' · work in progress' : ' · all constraints satisfied'}`, text, source, differences: result.differences } });
           }
           return send(200, result);
         }

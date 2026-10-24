@@ -1,4 +1,4 @@
-import { checkSchedule, clock, parseTime, validateData } from '/scheduler.mjs';
+import { checkSchedule, clock, parseTime, retainValidAssignments, validateData } from '/scheduler.mjs';
 import { initEventSetup } from '/event-setup.js';
 
 const $ = selector => document.querySelector(selector);
@@ -25,7 +25,7 @@ const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] 
 $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
 let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
-let editingShiftId = null, editingEvent = false, gemmaIssue = null;
+let editingShiftId = null, editingAssignmentsShiftId = null, editingEvent = false, gemmaIssue = null;
 let eventSetup;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
@@ -61,7 +61,7 @@ function person(id, list = state.volunteers) { return list.find(p => p.id === id
 function avatar(p) { const color = /^#[a-f\d]{6}$/i.test(p.color || '') ? p.color : '#7584b8'; return `<span class="avatar" style="background:${color}">${escape(p.name.charAt(0).toUpperCase())}</span>`; }
 function setBusy(value, button = null) {
   busy = value;
-  $$('#interpret-button, #reset-button, .edit-volunteer, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #describe-event, #event-use-gemma, #setup-close').forEach(b => { b.disabled = value; });
+  $$('#interpret-button, #reset-button, .edit-volunteer, .edit-assignments, #save-assignment-edits, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #describe-event, #event-use-gemma, #setup-close').forEach(b => { b.disabled = value; });
   $$('.button.busy').forEach(b => b.classList.remove('busy'));
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
@@ -118,12 +118,12 @@ function renderMetrics() {
   const covered = state.shifts.filter(s => checkSchedule(state.volunteers.map(p => ({ ...p, maxHours: 24 })), [s], { [s.id]: state.schedule[s.id] }).valid).length;
   const hours = Object.values(check.workloads).reduce((a, b) => a + b, 0);
   const repairs = state.history.filter(entry => !entry.kind || entry.kind === 'repair').length;
-  $('#metrics').innerHTML = metric('Shifts covered', `${covered}<span>/ ${state.shifts.length}</span>`, check.valid ? 'Every rule satisfied' : state.shifts.length ? 'Review schedule constraints' : 'Your event starts with a blank roster', 'shield', 'green') + metric('Volunteers on the team', state.volunteers.length, 'Good people. A shared purpose.', 'users') + metric('Volunteer hours', `${hours}<span>hrs</span>`, 'Across the day’s assignments', 'clock', 'orange-bg') + metric('Repairs applied', repairs, repairs ? 'Changes recorded in activity' : 'Ready when plans change', 'shuffle', 'purple');
-  $('#schedule-status').textContent = check.valid ? 'All covered' : state.shifts.length ? 'Draft · needs coverage' : 'No shifts yet';
+  $('#metrics').innerHTML = metric('Shifts covered', `${covered}<span>/ ${state.shifts.length}</span>`, check.valid ? 'Every shift covered' : state.shifts.length ? 'Open places can be filled one at a time' : 'Your event starts with a blank roster', 'shield', 'green') + metric('Volunteers on the team', state.volunteers.length, 'Good people. A shared purpose.', 'users') + metric('Volunteer hours', `${hours}<span>hrs</span>`, 'Across the day’s assignments', 'clock', 'orange-bg') + metric('Changes saved', repairs, repairs ? 'Recorded in activity' : 'Ready for your first assignment', 'shuffle', 'purple');
+  $('#schedule-status').textContent = check.valid ? 'All covered' : state.shifts.length ? 'In progress' : 'No shifts yet';
   $('[data-view=board] .nav-count').textContent = state.shifts.length;
   $('[data-view=team] .nav-count').textContent = state.volunteers.length;
   $('#team-count').textContent = `${state.volunteers.length} / 12 volunteers`;
-  $('#generate-schedule').textContent = check.valid ? 'Check & rebalance' : 'Generate schedule';
+  $('#generate-schedule').textContent = check.valid ? 'Check & rebalance' : 'Complete schedule';
   $('#schedule-status').className = `badge ${check.valid ? 'green' : 'rose'}`;
   $('#history-count').textContent = state.history.length;
   $('#request-input').placeholder = state.volunteers.length && state.shifts.length ? `e.g. Assign ${state.volunteers[0].name} to ${state.shifts[0].station}, ${clock(state.shifts[0].start)}–${clock(state.shifts[0].end)}.` : 'Add your team and shifts first, then describe a change.';
@@ -138,8 +138,9 @@ function renderBoard() {
     return `<article class="shift ${s.station === 'Support desk' ? 'support' : ''} ${!valid ? 'invalid' : latest ? 'changed' : ''}"><div class="shift-header"><span>${escape(s.station)}</span><span class="shift-time">${clock(s.start)}–${clock(s.end)}</span></div>${assigned.map(id => {
       const p = person(id);
       return `<div class="assignment ${latest?.added.includes(id) ? 'new-person' : ''}">${avatar(p)}<span class="person-name">${escape(p.name)}</span>${latest?.added.includes(id) ? '<small>new</small>' : p.skills.includes('first-aid') ? `<span title="First-aid trained">${icon('shield')}</span>` : ''}</div>`;
-    }).join('')}<div class="shift-note">${icon(valid ? 'check' : 'alert')}${!valid ? 'Coverage needs attention' : s.skills.includes('first-aid') ? 'First-aid coverage included' : `${assigned.length} of ${s.required} volunteers assigned`}</div></article>`;
+    }).join('')}<div class="shift-note">${icon(valid ? 'check' : 'alert')}${assigned.length < s.required ? `${s.required - assigned.length} open place${s.required - assigned.length === 1 ? '' : 's'}` : !valid ? 'Skill coverage still needed' : `${assigned.length} of ${s.required} volunteers assigned`}</div><button class="button subtle small edit-assignments" data-shift="${escape(s.id)}">Edit assignments</button></article>`;
   }).join('')}</div></div>`).join('') || `<div class="empty-state"><h3>${currentEvent ? 'Add the first shift for your event.' : 'Your workspace starts here.'}</h3><p>${currentEvent ? 'Open Manage team & shifts to add your people, availability and staffing requirements.' : 'Create your own event, then add the volunteers and shifts you need.'}</p>${!currentEvent ? '<button id="empty-create-event" class="button primary">Create your first event</button>' : ''}</div>`;
+  $$('.edit-assignments').forEach(button => button.addEventListener('click', () => openAssignmentEditor(button.dataset.shift)));
   $('#empty-create-event')?.addEventListener('click', () => $('#new-event').click());
   if (!currentEvent && !state.shifts.length) {
     const button = document.createElement('button'); button.className = 'button subtle'; button.textContent = 'Describe your event with Gemma';
@@ -163,9 +164,9 @@ function showView(view) {
 }
 function changeDescription(c, people = state.volunteers) {
   const p = person(c.volunteerId, people);
-  if (c.type === 'assign') {
+  if (c.type === 'assign' || c.type === 'unassign') {
     const shift = state.shifts.find(s => s.id === c.shiftId);
-    return `${p.name}: assign to ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}`;
+    return `${p.name}: ${c.type === 'assign' ? 'add to' : 'remove from'} ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}`;
   }
   return c.type === 'max_hours' ? `${p.name}: maximum ${c.hours} working hours` : `${p.name}: unavailable ${c.start}–${c.end}`;
 }
@@ -173,8 +174,8 @@ function renderInterpretation() {
   const el = $('#interpretation');
   if (!interpretation) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  el.innerHTML = `<span class="badge ${interpretation.source === 'gemma' ? 'purple' : 'neutral'}">${interpretation.source === 'gemma' ? 'GEMMA INTERPRETATION' : 'SCRIPTED SCENARIO'}</span><p>${escape(interpretation.message)}</p>${interpretation.changes.map(c => `<div class="change-line">${escape(changeDescription(c))}</div>`).join('')}<div class="provenance">${interpretation.source === 'gemma' ? escape(interpretation.model) : 'Demo instructions are predefined. Gemma was not called.'}</div>${interpretation.status === 'ready' ? `<button id="find-cover" class="button primary full">${interpretation.changes.some(c => c.type === 'assign') ? 'Confirm & preview schedule' : 'Confirm & find cover'}</button>` : ''}`;
-  $('#find-cover')?.addEventListener('click', () => runRepair(interpretation.changes, interpretation.source, interpretation.message));
+  el.innerHTML = `<span class="badge ${interpretation.source === 'gemma' ? 'purple' : 'neutral'}">${interpretation.source === 'gemma' ? 'GEMMA INTERPRETATION' : 'PROPOSED CHANGES'}</span><p>${interpretation.status === 'ready' ? 'Review these proposed changes. Nothing has been saved.' : escape(interpretation.message)}</p>${interpretation.changes.map(c => `<div class="change-line">${escape(changeDescription(c))}</div>`).join('')}<div class="provenance">${interpretation.source === 'gemma' ? escape(interpretation.model) : ''}</div>${interpretation.status === 'ready' ? '<button id="find-cover" class="button primary full">Preview changes</button>' : ''}`;
+  $('#find-cover')?.addEventListener('click', () => runRepair(interpretation.changes, interpretation.source, interpretation.requestText || interpretation.message));
 }
 async function runRepair(changes, source, requestText, people = state.volunteers) {
   if (busy) return;
@@ -190,41 +191,61 @@ function renderPreview() {
   const el = $('#repair-panel');
   if (!preview) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
+  const incremental = preview.mode === 'incremental';
   if (!preview.schedule) {
-    const exhausted = preview.status === 'infeasible';
-    el.innerHTML = `<div class="eyebrow muted">${exhausted ? 'CONSTRAINT CONFLICT' : 'SEARCH LIMIT REACHED'}</div><h2>${exhausted ? 'This shift needs more than a shuffle.' : 'We need more search time.'}</h2><p>${exhausted ? 'No valid schedule satisfies these changes. Your current rota is unchanged.' : 'No solution was found within the search budget. This does not prove the request is impossible.'}</p><ul class="conflict-list">${preview.diagnostics.map(text => `<li>${escape(text)}</li>`).join('')}</ul><div class="repair-actions"><button id="discard-preview" class="button subtle">Dismiss</button></div>`;
+    const conflict = preview.status === 'infeasible' || preview.status === 'conflict';
+    el.innerHTML = `<div class="eyebrow muted">${conflict ? 'ASSIGNMENT CONFLICT' : 'SEARCH LIMIT REACHED'}</div><h2>${conflict ? incremental ? 'These changes need a small adjustment.' : 'The complete schedule needs more coverage.' : 'We need more search time.'}</h2><p>${conflict ? incremental ? 'The requested changes conflict with an assignment rule. Your saved assignments are unchanged.' : 'A complete schedule cannot be generated yet. You can still add or edit individual assignments.' : 'No complete schedule was found within the search budget. This does not prove the event is impossible.'}</p><ul class="conflict-list">${preview.diagnostics.map(text => `<li>${escape(text)}</li>`).join('')}</ul><div class="repair-actions"><button id="discard-preview" class="button subtle">Dismiss</button></div>`;
   } else {
+    const placements = preview.assignments || [];
+    const fullCheck = checkSchedule(preview.volunteers, state.shifts, preview.schedule);
+    const edits = preview.changes || placements;
     const count = preview.changedAssignments;
-    const requested = preview.assignments || [];
-    el.innerHTML = `<div class="eyebrow muted">YOUR REPAIR PREVIEW</div><h2>${count ? 'A little reshuffle. Back on track.' : preview.differences.length ? 'Your schedule is ready.' : 'The current rota still works.'}</h2><p>${escape(preview.requestText)} Your changes take effect only when you apply this repair.</p><div class="repair-summary"><span class="badge green">${icon('check')} All rules satisfied</span><span class="badge purple">${count} previous assignment${count === 1 ? '' : 's'} replaced</span><span class="badge neutral">${preview.optimal ? 'FEWEST CHANGES VERIFIED' : 'VALID SOLUTION · OPTIMALITY NOT PROVEN'}</span></div>${preview.differences.map(d => `<div class="diff-row"><div><strong>${escape(d.station)}</strong><small>${clock(d.start)}–${clock(d.end)}</small></div><span class="removed-name">${d.removed.map(id => escape(person(id).name)).join(', ')}</span>${icon('arrow')}<span class="added-name">${d.added.map(id => escape(person(id, preview.volunteers).name)).join(', ')}</span></div>`).join('')}<p class="fine-print">${preview.nodes.toLocaleString()} search states checked in ${preview.elapsedMs} ms. The solver checks every rule again before returning a result.${preview.optimal ? ' Workload balance breaks ties between equally small repairs.' : ''}</p><div class="repair-actions"><button id="discard-preview" class="button subtle">Keep current schedule</button><button id="apply-repair" class="button primary">Apply repair ${icon('check')}</button></div>`;
-    if (requested.length) {
-      const summary = document.createElement('div');
-      summary.innerHTML = `<h3>Requested assignments</h3>${requested.map(c => `<div class="change-line">${escape(changeDescription(c, preview.volunteers))}</div>`).join('')}<p class="fine-print">These placements are required for this preview. Later repairs may move volunteers when needed.</p>`;
-      el.querySelector('.repair-summary').after(summary);
-    }
+    const differences = preview.differences.map(d => `<div class="diff-row"><div><strong>${escape(d.station)}</strong><small>${clock(d.start)}–${clock(d.end)}</small></div><span class="removed-name">${d.removed.map(id => escape(person(id).name)).join(', ')}</span>${icon('arrow')}<span class="added-name">${d.added.map(id => escape(person(id, preview.volunteers).name)).join(', ')}</span></div>`).join('');
+    el.innerHTML = `<div class="eyebrow muted">${incremental ? 'YOUR SHIFT CHANGES' : 'COMPLETE SCHEDULE PREVIEW'}</div><h2>${incremental ? 'Save this step. Keep building.' : 'Review the complete schedule.'}</h2><p>${incremental ? 'Only these changes will be saved. Other shifts can stay open.' : 'The full schedule takes effect only when you apply it.'}</p><div class="repair-summary"><span class="badge green">${icon('check')} ${incremental ? 'No assignment conflicts' : 'All rules satisfied'}</span><span class="badge ${fullCheck.valid ? 'green' : 'neutral'}">${fullCheck.valid ? 'All shifts covered' : 'Schedule in progress'}</span><span class="badge purple">${count} assignment${count === 1 ? '' : 's'} ${incremental ? 'updated' : 'replaced'}</span></div>${edits.length ? `<h3>Proposed changes</h3>${edits.map(c => `<div class="change-line">${escape(changeDescription(c, preview.volunteers))}</div>`).join('')}` : ''}${differences}${incremental && preview.warnings?.length ? `<div class="setup-review-notice"><strong>You can save now; these gaps can be filled later.</strong><ul>${preview.warnings.map(text => `<li>${escape(text)}</li>`).join('')}</ul></div>` : ''}<p class="fine-print">${incremental ? 'Adding, removing or moving one volunteer does not require a complete event schedule.' : `${preview.nodes.toLocaleString()} search states checked. ${preview.optimal ? 'Fewest changes verified; workload balance breaks ties.' : 'Valid solution; optimality is not proven.'}`}</p><div class="repair-actions"><button id="discard-preview" class="button subtle">Keep saved assignments</button><button id="apply-repair" class="button primary">${incremental ? 'Save changes' : 'Apply complete schedule'} ${icon('check')}</button></div>`;
     $('#apply-repair').addEventListener('click', async () => {
       if (busy) return;
-      const check = checkSchedule(preview.volunteers, state.shifts, preview.schedule, { assignments: requested });
-      if (!check.valid) { notify('Validation failed. Your original schedule is unchanged.', true); return; }
+      const check = checkSchedule(preview.volunteers, state.shifts, preview.schedule, { assignments: placements, allowPartial: incremental });
+      if (!check.valid) { notify('Validation failed. Your saved assignments are unchanged.', true); return; }
       if (currentEvent) {
         setBusy(true, $('#apply-repair'));
         try {
           const saved = await api(`/api/events/${currentEvent.id}/apply`, { proposalId: preview.proposalId });
-          adoptCloud(saved); await refreshEventList(); notify('Repair applied and saved to Supabase. The cloud version and activity log are up to date.');
+          adoptCloud(saved); await refreshEventList(); notify(incremental ? 'Changes saved. You can fill the remaining shifts whenever you are ready.' : 'Complete schedule applied and saved.');
           $('#schedule-board').scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch (error) { notify(error.message, true); } finally { setBusy(false); }
         return;
       }
       state.volunteers = preview.volunteers; state.schedule = preview.schedule;
-      state.history.unshift({ at: new Date().toISOString(), title: `${preview.changedAssignments} assignment${preview.changedAssignments === 1 ? '' : 's'} changed · all constraints satisfied`, text: preview.requestText, source: preview.source, differences: preview.differences });
+      state.history.unshift({ at: new Date().toISOString(), title: `${count} assignment${count === 1 ? '' : 's'} updated`, text: preview.requestText, source: preview.source, differences: preview.differences });
       state.history = state.history.slice(0, 50);
       preview = null; interpretation = null; render(); renderPreview(); renderInterpretation(); persist();
-      notify('Repair applied. The rota is valid, and your changes are saved on this browser.');
+      notify('Changes saved on this browser. Open places can be filled later.');
       $('#schedule-board').scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   }
   $('#discard-preview').addEventListener('click', () => { preview = null; renderPreview(); });
 }
+function openAssignmentEditor(id) {
+  if (busy) return;
+  editingAssignmentsShiftId = id;
+  const shift = state.shifts.find(s => s.id === id);
+  $('#assignment-title').textContent = `${shift.station} · ${clock(shift.start)}–${clock(shift.end)}`;
+  $('#assignment-help').textContent = `Choose up to ${shift.required} volunteer${shift.required === 1 ? '' : 's'}. You can leave places open and save other shifts later.`;
+  $('#assignment-options').innerHTML = state.volunteers.map(p => `<label class="checkbox-label"><input type="checkbox" data-volunteer="${escape(p.id)}" ${(state.schedule[id] || []).includes(p.id) ? 'checked' : ''}>${escape(p.name)}</label>`).join('') || '<p>Add a volunteer in Manage team & shifts first.</p>';
+  $('#assignment-message').textContent = '';
+  $('#assignment-dialog').showModal();
+}
+$('#assignment-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (busy) return;
+  const shift = state.shifts.find(s => s.id === editingAssignmentsShiftId);
+  const selected = [...$('#assignment-options').querySelectorAll('input:checked')].map(el => el.dataset.volunteer);
+  if (selected.length > shift.required) { $('#assignment-message').textContent = `This shift has ${shift.required} place${shift.required === 1 ? '' : 's'}. Remove a selection before previewing.`; return; }
+  const before = state.schedule[shift.id] || [];
+  const changes = [...before.filter(id => !selected.includes(id)).map(volunteerId => ({ type: 'unassign', volunteerId, shiftId: shift.id })), ...selected.filter(id => !before.includes(id)).map(volunteerId => ({ type: 'assign', volunteerId, shiftId: shift.id }))];
+  $('#assignment-dialog').close();
+  if (!changes.length) { notify('No assignment changes to save.'); return; }
+  await runRepair(changes, 'team', `Updated assignments for ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}.`);
+});
 function openEditor(id = null) {
   if (busy) return;
   if (!id && state.volunteers.length >= 12) { notify('This prototype supports up to 12 volunteers per event.', true); return; }
@@ -236,10 +257,8 @@ function openEditor(id = null) {
 }
 function skillList(value) { return [...new Set(value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean))]; }
 function draftState(next) {
-  const ids = new Set(next.volunteers.map(p => p.id));
-  next.schedule = Object.fromEntries(next.shifts.map(s => [s.id, [...new Set((next.schedule[s.id] || []).filter(id => ids.has(id)))].slice(0, s.required)]));
-  validateData(next.volunteers, next.shifts, next.schedule, { allowEmpty: true });
-  if (!checkSchedule(next.volunteers, next.shifts, next.schedule).valid) next.schedule = Object.fromEntries(next.shifts.map(s => [s.id, []]));
+  validateData(next.volunteers, next.shifts, null, { allowEmpty: true });
+  next.schedule = retainValidAssignments(next.volunteers, next.shifts, next.schedule);
   return next;
 }
 async function saveSetup(next) {
@@ -248,7 +267,7 @@ async function saveSetup(next) {
     if (currentEvent) { adoptCloud(await api(`/api/events/${currentEvent.id}/setup`, { state: next, expectedVersion: currentEvent.version })); await refreshEventList(); }
     else { next.history.unshift({ at: new Date().toISOString(), kind: 'setup', title: 'Event setup updated', text: 'Updated the team or shifts.', source: 'team', differences: [] }); next.history = next.history.slice(0, 50); state = next; preview = null; interpretation = null; persist(); render(); renderPreview(); renderInterpretation(); }
     const ready = state.shifts.length && checkSchedule(state.volunteers, state.shifts, state.schedule).valid;
-    notify(ready ? 'Setup saved. The current schedule still satisfies every rule.' : 'Setup saved as a draft. Add the remaining team and shifts, then click Generate schedule.');
+    notify(ready ? 'Setup saved. Every shift is covered.' : 'Setup saved. Unaffected assignments were kept. Fill open places one at a time or choose Complete schedule.');
   } finally { setBusy(false); }
 }
 function renderShifts() {
@@ -315,7 +334,9 @@ $('#request-form').addEventListener('submit', async event => {
   if (!connection.configured) { $('#connection-dialog').showModal(); return; }
   clearNotice(); preview = null; interpretation = null; renderPreview(); renderInterpretation(); setBusy(true, $('#interpret-button'));
   try {
-    interpretation = await api('/api/interpret', { request, volunteers: state.volunteers, shifts: state.shifts, eventId: currentEvent?.id, date: state.date });
+    const result = await api('/api/interpret', { request, volunteers: state.volunteers, shifts: state.shifts, schedule: state.schedule, eventId: currentEvent?.id, date: state.date });
+    if ($('#request-input').value.trim() !== request) { notify('Your request changed. Choose Understand request again for the new text.'); return; }
+    interpretation = { ...result, requestText: request };
     clearGemmaError(); connection.verified = true; renderConnection(); renderInterpretation();
   } catch (error) { showGemmaError(error); notify(error.message, true); } finally { setBusy(false); }
 });
@@ -419,7 +440,7 @@ eventSetup = initEventSetup({
     setBusy(true); adoptCloud(saved); showView('board');
     try { await refreshEventList(); } catch { notify('The event was saved, but the event list could not refresh. Reload the page if needed.', true); }
     finally { setBusy(false); }
-    await runRepair([], 'team', 'Generated a schedule from the reviewed event setup. Review and apply it to save assignments.');
+    notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full rota.');
   }
 });
 async function init() {
@@ -440,5 +461,5 @@ async function init() {
     if (auth.user) await restoreCloud();
   } catch (error) { notify(`Could not load the workspace: ${error.message}`, true); }
 }
-$('#request-input').addEventListener('input', () => { try { sessionStorage.setItem('shiftrescue-request-draft', $('#request-input').value); } catch {} });
+$('#request-input').addEventListener('input', () => { interpretation = null; preview = null; renderInterpretation(); renderPreview(); try { sessionStorage.setItem('shiftrescue-request-draft', $('#request-input').value); } catch {} });
 init();

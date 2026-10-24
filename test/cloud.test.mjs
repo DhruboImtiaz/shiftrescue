@@ -43,7 +43,7 @@ test('refreshing a session rotates cookies before querying as that user', async 
   assert.equal(active.access, 'new-access'); assert.match(res.headers['Set-Cookie'][0], /new-access/);
 });
 test('invalid schedules and impossible calendar dates cannot be cloud saved', () => {
-  const invalid = structuredClone(demo); invalid.schedule['help-14'] = ['arif', 'tanvir'];
+  const invalid = structuredClone(demo); invalid.schedule['help-14'] = ['arif', 'arif'];
   assert.throws(() => validateEventState(invalid), /rules are broken/);
   assert.throws(() => validateEventState({ ...demo, date: '2026-02-31' }), /valid date/);
   assert.throws(() => validateEventState({ ...demo, timezone: 'Europe/London' }), /timezone/);
