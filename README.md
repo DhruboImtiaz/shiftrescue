@@ -2,11 +2,17 @@
 
 > **A change of plans, handled.**
 
-ShiftRescue helps volunteer coordinators set up events and handle last-minute absences. Describe an event to build a reviewed team and shift draft, or describe what changed to repair an existing rota. Preview and accept a schedule that satisfies staffing, skills, availability and hour limits.
+ShiftRescue helps volunteer coordinators create events and manage schedules one shift at a time. Start with text, English or Bengali speech, or a photo of an event roster. Review the extracted team, shifts and assignments, then save your progress while other places remain open. Describe later changes to add, remove, move or replace volunteers, with availability, overlaps, capacity and hour limits checked before saving.
 
 Accounts start with an empty workspace. Create your own events, volunteers and shifts, or explicitly open an event you have saved. Supabase provides email/password accounts and private cloud storage; Netlify hosts the frontend and backend.
 
 **Live:** [shiftrescue.netlify.app](https://shiftrescue.netlify.app/)
+
+## Start using ShiftRescue
+
+1. Sign in, then choose **Create from text or photo**. Type an event brief, use **Tap to talk**, or upload/take a roster photo. Add notes to explain unclear columns or missing details.
+2. Review the event, volunteers, shifts and assignment preview. Correct names and times, complete missing details, then choose **Create event**. This creates a separate saved event.
+3. Use **Edit assignments** at the bottom-right of a shift card, or describe a change in **What changed?** Review the interpretation and preview, then **Save changes**. Open places can stay open; **Complete schedule** is optional.
 
 ---
 
@@ -46,7 +52,7 @@ Language support: [Google transcription model documentation](https://ai.google.d
 ### Constraint-Based Scheduling
 
 - Check full-shift availability, staffing, required skills, overlapping assignments and total hours.
-- Minimize replacements in the existing rota, then use workload balance to break ties.
+- Minimize replacements in the existing schedule, then use workload balance to break ties.
 - Independently validate every returned schedule.
 - Distinguish proved infeasibility from a search limit, and a proved optimum from a valid best-so-far result.
 
@@ -223,6 +229,9 @@ Confirm signup emails when required, then return to the app and sign in. Account
 3. Sign in, create an event with several shifts, and save one volunteer to one shift while the others remain open.
 4. Reload the page and confirm the event is restored.
 5. Send a real Gemma add, remove or move request, review the proposed edits, then preview and save. Confirm unrelated placements are preserved.
+6. Use **Create from text or photo → Upload photo** with a clear roster containing explicit assignments. Check extracted names, dates, times and placements in the editable preview; save a separate event with open places, then reload and reopen it.
+7. Use **Tap to talk** for an English and a Bengali request. Confirm the transcript is editable and nothing is interpreted or saved until you explicitly continue. Test **Take photo** on the target phone/browser.
+8. Confirm the interface uses “schedule” consistently and each shift’s **Edit assignments** button is at the bottom-right, including empty cards and phone layouts.
 
 If sign-in says **“Supabase has not been configured on the server,”** check both Supabase environment variables in the production Functions scope, then redeploy. Do not fix this by adding credentials to source code. A missing Gemma key affects natural-language requests; a missing signing secret prevents cloud repair previews from being accepted.
 
@@ -236,7 +245,7 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 - **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
 - **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
 - **Saved assignments:** Cloud saves are transactional and version-checked. Partial schedules can be saved; staffing and skill gaps remain visible until filled. Unconfirmed or failed edits preserve the saved event. Team/shift edits keep unaffected placements and reopen only assignments that no longer fit. Full schedule generation remains a separate action.
-- **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
+- **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Selected photos are sent only when creating a photo draft; recordings are sent only after stopping transcription. Original images and audio are not stored in the event database. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
 - **Credentials:** Private environment files, credentials, local caches, dependencies, generated builds and backup artifacts are excluded by `.gitignore`. `.env.example` contains placeholders only. Never commit API keys or a Supabase service-role key.
 
 ---
@@ -245,7 +254,7 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 
 - Each event supports **12 volunteers, 8 shifts and 1–3 people per shift** on one day in **Asia/Dhaka**.
 - Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 operations**: adding/removing shift assignments, unavailability and maximum-hour changes. Moves and replacements use a removal plus an addition.
-- Setup supports one day in Dhaka, exact shift intervals, staffing and collective skill coverage. Create the event first, then request named shift assignments in **What changed?** Required breaks, travel time, permanent assignment locks, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
+- Setup supports one day in Dhaka, exact shift intervals, staffing, collective skill coverage and explicit initial assignments from text or a roster photo. Review those assignments before creating the event; later edits use **Edit assignments** or **What changed?** Required breaks, travel time, permanent assignment locks, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
 - Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
 - Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.
 - The search has a time/node budget; a valid best-so-far solution may not be proved optimal.

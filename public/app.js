@@ -442,7 +442,7 @@ eventSetup = initEventSetup({
     setBusy(true); adoptCloud(saved); showView('board');
     try { await refreshEventList(); } catch { notify('The event was saved, but the event list could not refresh. Reload the page if needed.', true); }
     finally { setBusy(false); }
-    notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full rota.');
+    notify('Event saved. Add volunteers to individual shifts, or choose Complete schedule when you want a full schedule.');
   }
 });
 voiceInputs = initVoiceInputs({
