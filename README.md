@@ -25,6 +25,8 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Review and edit every extracted field, add or remove draft rows, and resolve missing details before saving a separate event to Supabase.
 - Generate assignments with the constraint engine after setup, then review and apply the schedule separately. Infeasible events remain editable drafts.
 - Interpret requests such as **“Nadia cannot work from 14:00 to 16:00.”**
+- Assign volunteers to existing shifts with requests such as **“Assign Nadia to Support desk 10:00–12:00, and Rahim to Registration 12:00–14:00.”** Review the named placements, then preview and apply a valid schedule. Conflicting placements never override availability, skills, staffing or hour limits.
+- Requested assignments apply to the current repair; later repairs can move volunteers when needed. Include the shift time when several shifts share a station name.
 - Support multiple unavailable intervals and maximum-hour changes in one message.
 - Ask for clarification instead of guessing ambiguous times or unknown people.
 - Validate structured model output before it reaches the scheduling engine.
@@ -44,6 +46,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Clearly label unknown refresh times and zero-quota/model-access problems.
 - Keep manual team editing and schedule generation available without an AI call.
 - Avoid automatic model requests on every page load.
+- Retry temporary Gemma service/network failures up to three attempts within one 45-second deadline. Quota and credential errors are returned immediately.
 - Share quota warnings and retry timing between event setup and change requests; keep the event description when a request fails.
 
 ### Cloud Storage & Export
@@ -215,8 +218,8 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 ## Roadmap / Known Limitations
 
 - Each event supports **12 volunteers, 8 shifts and 1–3 people per shift** on one day in **Asia/Dhaka**.
-- Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 changes**, limited to unavailability and maximum-hour changes.
-- Setup supports one day in Dhaka, exact shift intervals, staffing and collective skill coverage. Required breaks, travel time, fixed assignments, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
+- Event setup accepts descriptions up to **8,000 characters**. Existing-event change requests accept **3,000 characters** and **24 changes**: shift assignments, unavailability and maximum-hour changes.
+- Setup supports one day in Dhaka, exact shift intervals, staffing and collective skill coverage. Create the event first, then request named shift assignments in **What changed?** Required breaks, travel time, permanent assignment locks, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
 - Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
 - Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.
 - The search has a time/node budget; a valid best-so-far solution may not be proved optimal.

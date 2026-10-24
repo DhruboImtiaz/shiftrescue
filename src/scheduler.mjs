@@ -35,7 +35,7 @@ export function validateData(volunteers, shifts, schedule = null, { allowEmpty =
   if (schedule !== null && (typeof schedule !== 'object' || Array.isArray(schedule) || !schedule || Object.keys(schedule).some(id => !shiftIds.has(id)) || shifts.some(s => !Array.isArray(schedule[s.id]) || schedule[s.id].length > 12 || schedule[s.id].some(id => !ids.has(id))))) throw new Error('Invalid schedule assignments.');
 }
 
-export function validateChanges(changes, volunteers) {
+export function validateChanges(changes, volunteers, shifts = []) {
   if (!Array.isArray(changes) || changes.length > 24) throw new Error('Provide at most 24 changes at once.');
   for (const c of changes) {
     if (!c || !volunteers.some(p => p.id === c.volunteerId)) throw new Error('The request names an unknown volunteer. Please choose someone on this team.');
@@ -43,18 +43,20 @@ export function validateChanges(changes, volunteers) {
       if (parseTime(c.start) >= parseTime(c.end)) throw new Error('The unavailable interval must end after it starts.');
     } else if (c.type === 'max_hours') {
       if (!Number.isFinite(c.hours) || c.hours < 0 || c.hours > 24) throw new Error('Maximum hours must be a number between 0 and 24.');
-    } else throw new Error('Supported changes are unavailable time intervals and maximum working hours.');
+    } else if (c.type === 'assign') {
+      if (!shifts.some(s => s.id === c.shiftId)) throw new Error('The request names an unknown shift. Please choose a shift in this event.');
+    } else throw new Error('Supported changes are shift assignments, unavailable time intervals and maximum working hours.');
   }
   return changes;
 }
 
-export function applyChanges(volunteers, changes) {
-  validateChanges(changes, volunteers);
+export function applyChanges(volunteers, changes, shifts = []) {
+  validateChanges(changes, volunteers, shifts);
   const next = structuredClone(volunteers);
   for (const c of changes) {
     const person = next.find(p => p.id === c.volunteerId);
     if (c.type === 'max_hours') person.maxHours = c.hours;
-    else {
+    else if (c.type === 'unavailable') {
       const start = parseTime(c.start), end = parseTime(c.end);
       person.availability = person.availability.flatMap(([a, b]) => {
         if (end <= a || start >= b) return [[a, b]];
@@ -65,7 +67,13 @@ export function applyChanges(volunteers, changes) {
   return next;
 }
 
-export function checkSchedule(volunteers, shifts, schedule) {
+function validateAssignments(assignments, volunteers, shifts) {
+  validateChanges(assignments, volunteers, shifts);
+  if (assignments.some(c => c.type !== 'assign')) throw new Error('Schedule assignment requirements must name a volunteer and a shift.');
+}
+
+export function checkSchedule(volunteers, shifts, schedule, { assignments = [] } = {}) {
+  validateAssignments(assignments, volunteers, shifts);
   const errors = [], workloads = Object.fromEntries(volunteers.map(p => [p.id, 0]));
   const personById = new Map(volunteers.map(p => [p.id, p]));
   for (const s of shifts) {
@@ -84,6 +92,10 @@ export function checkSchedule(volunteers, shifts, schedule) {
     const assigned = shifts.filter(s => (schedule[s.id] || []).includes(p.id));
     for (let i = 0; i < assigned.length; i++) for (let j = i + 1; j < assigned.length; j++) if (overlap(assigned[i], assigned[j])) errors.push(`${p.name} is assigned to overlapping shifts.`);
   }
+  for (const c of assignments) {
+    const shift = shifts.find(s => s.id === c.shiftId);
+    if (!(schedule[c.shiftId] || []).includes(c.volunteerId)) errors.push(`${personById.get(c.volunteerId).name} must be assigned to ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}.`);
+  }
   return { valid: !errors.length, errors: [...new Set(errors)], workloads };
 }
 
@@ -95,18 +107,21 @@ function combinations(items, count, start = 0, chosen = [], result = []) {
   return result;
 }
 
-export function repairSchedule(volunteers, shifts, baseline, { maxNodes = 600000, maxMs = 1500 } = {}) {
+export function repairSchedule(volunteers, shifts, baseline, { assignments = [], maxNodes = 600000, maxMs = 1500 } = {}) {
   validateData(volunteers, shifts, baseline);
+  validateAssignments(assignments, volunteers, shifts);
   const begin = performance.now(), personById = new Map(volunteers.map(p => [p.id, p]));
   const diagnostics = [];
   const ordered = shifts.map(s => {
+    const requested = [...new Set(assignments.filter(c => c.shiftId === s.id).map(c => c.volunteerId))];
     const eligible = volunteers.filter(p => available(p, s) && p.maxHours * 60 >= s.end - s.start);
     for (const skill of s.skills) if (!eligible.some(p => p.skills.includes(skill))) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: no available volunteer with ${skill} training and enough hours for this shift.`);
     if (eligible.length < s.required) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: ${eligible.length} eligible volunteers for ${s.required} places.`);
     const options = combinations(eligible.map(p => p.id), s.required)
-      .filter(ids => s.skills.every(skill => ids.some(id => personById.get(id).skills.includes(skill))))
+      .filter(ids => requested.every(id => ids.includes(id)) && s.skills.every(skill => ids.some(id => personById.get(id).skills.includes(skill))))
       .map(ids => ({ ids, cost: (baseline[s.id] || []).filter(id => !ids.includes(id)).length }))
       .sort((a, b) => a.cost - b.cost);
+    if (requested.length && !options.length) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: assigning ${requested.map(id => personById.get(id).name).join(', ')} cannot satisfy this shift’s staffing, availability, skills and hour limits.`);
     return { ...s, options };
   }).sort((a, b) => a.options.length - b.options.length || a.start - b.start);
   if (ordered.some(s => !s.options.length)) return { status: 'infeasible', optimal: true, schedule: null, diagnostics, nodes: 0, elapsedMs: Math.round(performance.now() - begin) };
@@ -138,8 +153,8 @@ export function repairSchedule(volunteers, shifts, baseline, { maxNodes = 600000
     }
   }
   visit(0, 0);
-  if (!best) return { status: interrupted ? 'search_limit' : 'infeasible', optimal: !interrupted, schedule: null, diagnostics: [interrupted ? 'The search limit was reached before a valid schedule was found. This does not prove the request is impossible.' : 'Availability, overlapping shifts, skill requirements and hour limits cannot all be satisfied together. Try restoring availability or increasing an hour limit.'], nodes, elapsedMs: Math.round(performance.now() - begin) };
-  const validation = checkSchedule(volunteers, shifts, best);
+  if (!best) return { status: interrupted ? 'search_limit' : 'infeasible', optimal: !interrupted, schedule: null, diagnostics: [interrupted ? 'The search limit was reached before a valid schedule was found. This does not prove the request is impossible.' : assignments.length ? 'The requested assignments conflict with availability, overlapping shifts, skill requirements or hour limits. Try changing the requested placements.' : 'Availability, overlapping shifts, skill requirements and hour limits cannot all be satisfied together. Try restoring availability or increasing an hour limit.'], nodes, elapsedMs: Math.round(performance.now() - begin) };
+  const validation = checkSchedule(volunteers, shifts, best, { assignments });
   if (!validation.valid) throw new Error('Internal validation rejected the proposed schedule. The original schedule was preserved.');
   const differences = shifts.filter(s => best[s.id].some(id => !(baseline[s.id] || []).includes(id)) || (baseline[s.id] || []).some(id => !best[s.id].includes(id))).map(s => ({ shiftId: s.id, station: s.station, start: s.start, end: s.end, removed: (baseline[s.id] || []).filter(id => !best[s.id].includes(id)), added: best[s.id].filter(id => !(baseline[s.id] || []).includes(id)) }));
   return { status: 'feasible', optimal: !interrupted, schedule: best, changedAssignments: bestCost, differences, workloads: validation.workloads, nodes, elapsedMs: Math.round(performance.now() - begin), diagnostics: [] };
