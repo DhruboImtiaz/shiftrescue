@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { callGemma, interpretRequest, validateModel } from '../src/gemma.mjs';
-import { demo } from '../src/demo.mjs';
+import { demo } from '../test-fixtures/events.mjs';
 const config = { key: 'test-key-used-only-in-unit-tests', model: 'gemma-4-26b-a4b-it' };
 function response(text) { return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) }; }
 

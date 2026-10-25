@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { demo, scenarios } from '../src/demo.mjs';
+import { demo, scenarios } from '../test-fixtures/events.mjs';
 import { applyChanges, checkSchedule, repairSchedule, validateChanges, validateData, parseTime } from '../src/scheduler.mjs';
 
 test('the demo baseline satisfies every scheduling rule', () => {

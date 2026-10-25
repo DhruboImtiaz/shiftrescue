@@ -31,13 +31,18 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
   function fail(error) {
     if (!error) return;
     const conflict = error.code === 'PT409';
-    throw new AppError(conflict ? 'A newer event version is already saved. Reload the cloud copy before applying this repair.' : error.message || 'Supabase could not complete the request.', conflict ? 409 : 400);
+    throw new AppError(conflict ? 'A newer event version is already saved. Refresh the saved copy before trying again.' : error.message || 'Supabase could not complete the request.', conflict ? 409 : error.code === 'PT404' ? 404 : 400);
   }
+  const sessionUnavailable = () => new AppError('Could not verify your session right now. Please retry; your saved events are unchanged.', 503);
+  const temporaryAuthError = error => error && ![400, 401, 403, 422].includes(error.status);
   async function session(req, res, required = false) {
     if (!configured) { if (required) throw new AppError('Connect Supabase before signing in.', 503); return null; }
     const cookies = readCookies(req.headers.cookie), access = cookies.sr_access, refresh = cookies.sr_refresh;
     if (access) {
-      const { data, error } = await client().auth.getUser(access);
+      let result;
+      try { result = await client().auth.getUser(access); } catch { throw sessionUnavailable(); }
+      const { data, error } = result;
+      if (temporaryAuthError(error)) throw sessionUnavailable();
       if (!error && data.user && !data.user.is_anonymous) return { user: data.user, access, refresh, db: client(access) };
     }
     if (refresh) {
@@ -47,7 +52,11 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
         refreshes.set(refresh, pending);
         const timer = setTimeout(() => refreshes.delete(refresh), 20000); timer.unref();
       }
-      const { data, error } = await pending;
+      let result;
+      try { result = await pending; } catch { refreshes.delete(refresh); throw sessionUnavailable(); }
+      const { data, error } = result;
+      if (error) refreshes.delete(refresh);
+      if (temporaryAuthError(error)) throw sessionUnavailable();
       if (!error && data.session && !data.user?.is_anonymous) {
         res.setHeader('Set-Cookie', sessionCookies(data.session, secure));
         return { user: data.user, access: data.session.access_token, refresh: data.session.refresh_token, db: client(data.session.access_token) };
@@ -66,18 +75,25 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     return { user: data.session ? safeUser(data.user) : null, confirmationRequired: !data.session, message: data.session ? 'Signed in. Your saved events are ready.' : 'Check your email to confirm your account, then return here and sign in. If you already have an account, use Sign in.' };
   }
   async function logout(req, res) {
-    const active = await session(req, res);
     try {
+      const active = await session(req, res);
       if (active?.refresh) {
         const instance = client();
         const { error } = await instance.auth.setSession({ access_token: active.access, refresh_token: active.refresh });
         if (!error) await instance.auth.signOut({ scope: 'local' });
       }
-    } finally { res.setHeader('Set-Cookie', sessionCookies(null, secure)); }
+    } catch { /* Explicit local sign-out must work even during an Auth outage. */ }
+    finally { res.setHeader('Set-Cookie', sessionCookies(null, secure)); }
   }
-  async function list(active) {
-    const { data, error } = await active.db.from('shiftrescue_events').select('id,name,event_date,timezone,version,updated_at').order('updated_at', { ascending: false }).limit(50);
-    fail(error); return data;
+  async function list(active, { deleted = false } = {}) {
+    const events = [];
+    for (let offset = 0; ; offset += 200) {
+      let query = active.db.from('shiftrescue_events').select('id,name,event_date,timezone,version,updated_at,deleted_at');
+      query = deleted ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null);
+      const { data, error } = await query.order('updated_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + 199);
+      fail(error); events.push(...data);
+      if (data.length < 200) return events;
+    }
   }
   async function load(active, id) {
     if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new AppError('Invalid event ID.');
@@ -91,5 +107,10 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     const { data, error } = await active.db.rpc('shiftrescue_save_event', { p_event_id: id || null, p_expected_version: version || 0, p_state: { event: state.event, date: state.date, timezone: state.timezone, volunteers: state.volunteers, shifts: state.shifts, schedule: state.schedule }, p_activity: activity });
     fail(error); validateEventState(data.state); return data;
   }
-  return { configured, session, login, logout, list, load, save };
+  async function setDeleted(active, id, version, deleted) {
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || !Number.isSafeInteger(version) || version < 1) throw new AppError('Refresh the event before deleting or restoring it.');
+    const { data, error } = await active.db.rpc('shiftrescue_set_event_deleted', { p_event_id: id, p_expected_version: version, p_deleted: deleted });
+    fail(error); return data;
+  }
+  return { configured, session, login, logout, list, load, save, setDeleted };
 }

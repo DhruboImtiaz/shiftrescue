@@ -79,7 +79,7 @@ MESSAGE: ${JSON.stringify(request)}`;
   return { status: issues.length || questions.length ? 'clarification' : 'ready', message: parsed.message.trim(), questions, draft, issues, source: 'gemma', model: config.model };
 }
 
-export async function interpretRequest(config, request, volunteers, shifts, eventDate = '2026-10-18', schedule = null) {
+export async function interpretRequest(config, request, volunteers, shifts, eventDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), schedule = null) {
   if (typeof request !== 'string' || !request.trim() || request.length > 3000) throw new Error('Enter a request of 1–3,000 characters.');
   const currentSchedule = schedule || Object.fromEntries(shifts.map(s => [s.id, []]));
   validateData(volunteers, shifts, currentSchedule);

@@ -20,7 +20,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 
 ### Event & Team Management
 
-- Start with zero volunteers and shifts, then create separate events with a name and date or copy a roster you have opened.
+- Create separate events with a name and date or copy an event you have opened. Returning to the app reopens your selected saved event, or your latest event when there is no selection.
 - Add, edit and remove volunteers with custom skills, multiple availability windows and maximum daily hours.
 - Define shifts with staffing requirements and required skill coverage.
 - Save incomplete schedules and build them one volunteer at a time. Each shift has an Edit assignments button; completing the whole event is optional.
@@ -232,6 +232,8 @@ Confirm signup emails when required, then return to the app and sign in. Account
 6. Use **Create from text or photo → Upload photo** with a clear roster containing explicit assignments. Check extracted names, dates, times and placements in the editable preview; save a separate event with open places, then reload and reopen it.
 7. Use **Tap to talk** for an English and a Bengali request. Confirm the transcript is editable and nothing is interpreted or saved until you explicitly continue. Test **Take photo** on the target phone/browser.
 8. Confirm the interface uses “schedule” consistently and each shift’s **Edit assignments** button is at the bottom-right, including empty cards and phone layouts.
+9. Sign out and back in; the selected saved event should reopen. Use a local test harness to simulate an authentication/network outage and confirm a retry message appears without clearing credentials or the selected event preference.
+10. Edit a test event’s date, move it to Trash and restore it. Confirm the date, volunteers, shifts and assignments survive. Verify that a stale tab cannot save a deleted event or restore an older version.
 
 If sign-in says **“Supabase has not been configured on the server,”** check both Supabase environment variables in the production Functions scope, then redeploy. Do not fix this by adding credentials to source code. A missing Gemma key affects natural-language requests; a missing signing secret prevents cloud repair previews from being accepted.
 
@@ -239,11 +241,25 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 
 ---
 
+## Saved Events, Dates and Trash
+
+- Events do **not** expire or disappear when their event date passes. Past and future events stay saved until you explicitly move them to Trash.
+- Change the date through **Event settings → Event date → Save event settings**. Shift times remain in Dhaka.
+- Delete the open event through **Event settings → Delete event → Move to Trash**. Its volunteers, shifts, assignments and activity stay intact. Use **Trash → Restore event** to recover it; there is no automatic purge.
+- Sign-in and reload reopen the selected event, with the most recently updated available event as a fallback. A temporary network/authentication failure displays a retry state and preserves the selected event and credentials; it is not treated as an empty account.
+- The event list includes all pages rather than dropping older events after the first 50. Reset-to-empty and demo-loading controls are not part of the app. Test data lives in `test-fixtures/` and is not exposed through a public demo endpoint.
+
+### Database upgrade for existing installations
+
+Before deploying this version, apply `supabase/migrations/20261025010836_event_trash_and_restore.sql` to the existing database. It adds `deleted_at` and owner/version-checked delete/restore functions, and prevents loading or saving deleted events through the active-event functions. It removes no event data. New installations use the updated `supabase/schema.sql`.
+
+The lifecycle functions use `SECURITY INVOKER`, existing owner RLS and the signed-in user's token. Delete and restore increment the event version so an older tab cannot apply a preview created before either operation.
+
 ## Data Storage
 
-- **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in starts with an empty workspace; saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
+- **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in reopens the selected or latest saved event; all active saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
 - **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
-- **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Passwords and session tokens are not stored in browser local storage.
+- **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Temporary provider/network failures preserve these cookies and return a retryable error; confirmed invalid sessions still require sign-in. Passwords and session tokens are not stored in browser local storage.
 - **Saved assignments:** Cloud saves are transactional and version-checked. Partial schedules can be saved; staffing and skill gaps remain visible until filled. Unconfirmed or failed edits preserve the saved event. Team/shift edits keep unaffected placements and reopen only assignments that no longer fit. Full schedule generation remains a separate action.
 - **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Selected photos are sent only when creating a photo draft; recordings are sent only after stopping transcription. Original images and audio are not stored in the event database. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
 - **Credentials:** Private environment files, credentials, local caches, dependencies, generated builds and backup artifacts are excluded by `.gitignore`. `.env.example` contains placeholders only. Never commit API keys or a Supabase service-role key.
