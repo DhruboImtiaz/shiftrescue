@@ -30,6 +30,11 @@ test('confirmed revoked refresh tokens still clear invalid credentials', async (
   await assert.rejects(cloud.session({ headers: { cookie: 'sr_refresh=revoked' } }, res, true), e => e.status === 401);
   assert.ok(res.headers['Set-Cookie'].every(c => c.includes('Max-Age=0')));
 });
+test('explicit sign-out clears local credentials even during a provider outage', async () => {
+  const cloud = service(() => ({ auth: { getUser: async () => { throw new TypeError('fetch failed'); } } })), res = response();
+  await cloud.logout({ headers: { cookie: 'sr_access=old; sr_refresh=old' } }, res);
+  assert.ok(res.headers['Set-Cookie'].every(c => c.includes('Max-Age=0')));
+});
 test('event lists include all pages and explicitly separate active events from Trash', async () => {
   const requests = [];
   const active = { db: { from: () => {

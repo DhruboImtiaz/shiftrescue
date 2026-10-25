@@ -75,14 +75,15 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     return { user: data.session ? safeUser(data.user) : null, confirmationRequired: !data.session, message: data.session ? 'Signed in. Your saved events are ready.' : 'Check your email to confirm your account, then return here and sign in. If you already have an account, use Sign in.' };
   }
   async function logout(req, res) {
-    const active = await session(req, res);
     try {
+      const active = await session(req, res);
       if (active?.refresh) {
         const instance = client();
         const { error } = await instance.auth.setSession({ access_token: active.access, refresh_token: active.refresh });
         if (!error) await instance.auth.signOut({ scope: 'local' });
       }
-    } finally { res.setHeader('Set-Cookie', sessionCookies(null, secure)); }
+    } catch { /* Explicit local sign-out must work even during an Auth outage. */ }
+    finally { res.setHeader('Set-Cookie', sessionCookies(null, secure)); }
   }
   async function list(active, { deleted = false } = {}) {
     const events = [];
