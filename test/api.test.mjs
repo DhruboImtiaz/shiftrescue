@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApi, normalizeSetup } from '../src/api.mjs';
 import { proposalTokens } from '../src/proposals.mjs';
-import { demo } from '../src/demo.mjs';
+import { demo } from '../test-fixtures/events.mjs';
 import { checkSchedule, repairSchedule } from '../src/scheduler.mjs';
 const request = (path, body, headers = {}) => new Request(`https://shiftrescue.netlify.app${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
 

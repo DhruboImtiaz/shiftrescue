@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cloudService, readCookies, sessionCookies, validateEventState } from '../src/cloud.mjs';
-import { demo } from '../src/demo.mjs';
+import { demo } from '../test-fixtures/events.mjs';
 
 const response = () => ({ headers: {}, setHeader(key, value) { this.headers[key] = value; } });
 const service = factory => cloudService({ url: 'https://test.supabase.co', key: 'test-publishable-key', createSupabaseClient: factory });
@@ -21,7 +21,7 @@ test('an absent session cannot access a saved event', async () => {
 });
 test('a forged cookie is checked with Supabase and rejected', async () => {
   let checks = 0;
-  const cloud = service(() => ({ auth: { getUser: async () => { checks++; return { data: {}, error: { message: 'Invalid token' } }; } } }));
+  const cloud = service(() => ({ auth: { getUser: async () => { checks++; return { data: {}, error: { message: 'Invalid token', status: 401 } }; } } }));
   const res = response();
   await assert.rejects(cloud.session({ headers: { cookie: 'sr_access=forged' } }, res, true), error => error.status === 401);
   assert.equal(checks, 1); assert.ok(res.headers['Set-Cookie'].every(c => c.includes('Max-Age=0')));

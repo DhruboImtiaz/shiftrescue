@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { callGemma, interpretEventSetup, interpretRequest } from '../src/gemma.mjs';
 import { createApi } from '../src/api.mjs';
-import { demo } from '../src/demo.mjs';
+import { demo } from '../test-fixtures/events.mjs';
 
 const config = { key: 'private-recovery-test-key', model: 'gemma-4-26b-a4b-it' };
 const answer = text => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }));

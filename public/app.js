@@ -1,6 +1,7 @@
 import { checkSchedule, clock, parseTime, retainValidAssignments, validateData } from '/scheduler.mjs';
 import { initEventSetup } from '/event-setup.js';
 import { initVoiceInputs } from '/voice.js';
+import { recoverSavedEvent } from '/workspace.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -28,6 +29,7 @@ $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
 let editingShiftId = null, editingAssignmentsShiftId = null, editingEvent = false, gemmaIssue = null;
 let eventSetup, voiceInputs;
+let deleteTarget = null;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
 const storageKey = 'shiftrescue-draft-v2';
@@ -46,7 +48,14 @@ function clearWorkspace() {
 async function api(path, data, { signal } = {}) {
   const response = await fetch(path, data === undefined ? { signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal });
   const result = await response.json().catch(() => ({ error: response.status === 429 ? 'The site is receiving too many requests. Please wait before retrying.' : 'The server could not respond. Please retry.' }));
-  if (!response.ok) { const error = new Error(result.error || 'Something went wrong. Please retry.'); error.status = response.status; error.quota = result.quota; throw error; }
+  if (!response.ok) {
+    if (response.status === 401 && auth.user && !path.startsWith('/api/auth/')) {
+      auth.user = null; eventSetup?.clear(); renderCloud();
+      $('#auth-message').textContent = 'Your session ended. Sign in again to reopen your saved events. Nothing has been deleted.';
+      if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
+    }
+    const error = new Error(result.error || 'Something went wrong. Please retry.'); error.status = response.status; error.quota = result.quota; throw error;
+  }
   return result;
 }
 function persist() {
@@ -62,7 +71,7 @@ function person(id, list = state.volunteers) { return list.find(p => p.id === id
 function avatar(p) { const color = /^#[a-f\d]{6}$/i.test(p.color || '') ? p.color : '#7584b8'; return `<span class="avatar" style="background:${color}">${escape(p.name.charAt(0).toUpperCase())}</span>`; }
 function setBusy(value, button = null) {
   busy = value;
-  $$('#interpret-button, #reset-button, .edit-volunteer, .edit-assignments, #save-assignment-edits, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #describe-event, #event-use-gemma, #setup-close').forEach(b => { b.disabled = value; });
+  $$('#interpret-button, .edit-volunteer, .edit-assignments, #save-assignment-edits, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #describe-event, #event-use-gemma, #setup-close, #open-trash, #delete-event, #confirm-delete-event, .restore-event, #connection-button').forEach(b => { b.disabled = value; });
   $$('.button.busy').forEach(b => b.classList.remove('busy'));
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
@@ -81,13 +90,14 @@ function renderCloud() {
   $('#signed-in-panel').classList.toggle('hidden', !auth.user);
   $('#auth-form').classList.toggle('hidden', !!auth.user);
   $('#signed-in-email').textContent = auth.user?.email || '';
-  $('#event-select').innerHTML = '<option value="">Choose a saved event or create a new one</option>' + savedEvents.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
+  const choices = currentEvent && !savedEvents.some(e => e.id === currentEvent.id) ? [{ id: currentEvent.id, name: state.event, event_date: state.date }, ...savedEvents] : savedEvents;
+  $('#event-select').innerHTML = `<option value="" ${choices.length ? 'disabled' : ''}>Choose a saved event or create a new one</option>` + choices.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
   $('#event-select').value = currentEvent?.id || '';
   $('#cloud-status').textContent = currentEvent ? `Saved to Supabase · version ${currentEvent.version}` : auth.user ? 'Create an event to start your own roster' : 'Sign in to create and save your event';
   $('#cloud-status').classList.toggle('saved', !!currentEvent);
-  $('#reload-event').classList.toggle('hidden', !currentEvent);
+  $('#reload-event').classList.toggle('hidden', !auth.user);
   $('#edit-event').classList.toggle('hidden', !currentEvent);
-  $('#reset-button').innerHTML = icon('reset') + 'Back to empty workspace';
+  $('#open-trash').classList.toggle('hidden', !auth.user);
   $('#event-date-label').textContent = new Date(`${state.date}T00:00:00+06:00`).toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'long', year: 'numeric' });
   $('#event-name-label').textContent = `${state.event} · GMT+6`;
 }
@@ -102,9 +112,15 @@ async function refreshEventList() { if (auth.user) savedEvents = (await api('/ap
 async function restoreCloud({ resume = true } = {}) {
   await refreshEventList();
   let last; try { if (resume) last = localStorage.getItem(selectedEventKey(auth.user.id)); } catch {}
-  const selected = savedEvents.find(e => e.id === last);
-  if (selected) adoptCloud(await api(`/api/events/${selected.id}`));
+  const selected = await recoverSavedEvent({ selectedId: last, events: savedEvents, load: id => api(`/api/events/${id}`) });
+  if (selected) adoptCloud(selected);
   else { clearWorkspace(); persist(); render(); renderPreview(); renderInterpretation(); }
+}
+function workspaceStatus(mode, message = '') {
+  const pending = mode !== 'ready'; document.body.classList.toggle('loading-workspace', pending);
+  $('#workspace-loading').classList.toggle('hidden', !pending);
+  $('#workspace-loading-message').textContent = message || 'Opening your saved workspace…';
+  $('#retry-workspace').classList.toggle('hidden', mode !== 'error');
 }
 function setAuthMode(mode) {
   authMode = mode; $('#auth-title').textContent = mode === 'signup' ? 'Your next event starts here.' : 'Welcome back.';
@@ -369,11 +385,6 @@ $('#edit-form').addEventListener('submit', async event => {
     await saveSetup(next); $('#edit-dialog').close();
   } catch (error) { $('#edit-message').textContent = error.message; }
 });
-$('#reset-button').addEventListener('click', () => {
-  if (busy) return;
-  clearWorkspace(); render(); renderInterpretation(); renderPreview(); persist(); clearNotice(); showView('board');
-  notify('Opened an empty workspace. Your saved events remain available in the event selector.');
-});
 $('#export-button').addEventListener('click', () => {
   const cell = value => { let text = String(value); if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`; return `"${text.replace(/"/g, '""')}"`; };
   const rows = [['Date', 'Timezone', 'Station', 'Start', 'End', 'Volunteers', 'Required skills'], ...state.shifts.map(s => [state.date, state.timezone, s.station, clock(s.start), clock(s.end), state.schedule[s.id].map(id => person(id).name).join('; '), s.skills.join('; ')])];
@@ -387,14 +398,18 @@ $('#auth-dialog').addEventListener('close', () => { $('#auth-password').value = 
 $('#auth-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   setBusy(true, $('#auth-submit')); $('#auth-message').textContent = authMode === 'signup' ? 'Creating your account…' : 'Signing in…';
+  let authenticated = false;
   const password = $('#auth-password').value; $('#auth-password').value = '';
   try {
     const result = await api(`/api/auth/${authMode}`, { email: $('#auth-email').value.trim(), password });
     if (result.confirmationRequired) { setAuthMode('signin'); $('#auth-message').textContent = result.message; return; }
-    auth.user = result.user; clearWorkspace(); render(); await restoreCloud({ resume: false }); $('#auth-dialog').close();
-    notify(savedEvents.length ? 'Signed in. Create a new event or choose one of your saved events.' : 'Signed in. Create your first event to get started.');
+    auth.user = result.user; authenticated = true; workspaceStatus('loading'); clearWorkspace(); await restoreCloud(); workspaceStatus('ready'); $('#auth-dialog').close();
+    notify(currentEvent ? `Signed in. Reopened “${state.event}”.` : 'Signed in. Create your first event to get started.');
 
-  } catch (error) { $('#auth-message').textContent = error.message; } finally { setBusy(false); }
+  } catch (error) {
+    if (authenticated) { $('#auth-dialog').close(); workspaceStatus('error', `${error.message} Your saved events have not been deleted. Try opening them again.`); }
+    else $('#auth-message').textContent = error.message;
+  } finally { setBusy(false); }
 });
 $('#signout-button').addEventListener('click', async () => {
   if (busy) return; setBusy(true, $('#signout-button'));
@@ -404,8 +419,52 @@ $('#signout-button').addEventListener('click', async () => {
   } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });
 $('#edit-event').addEventListener('click', () => { editingEvent = true; openEventDialog(); });
+$('#delete-event').addEventListener('click', () => {
+  if (busy || !currentEvent) return;
+  deleteTarget = { ...currentEvent, name: state.event };
+  $('#event-dialog').close(); $('#delete-event-description').textContent = `“${deleteTarget.name}” will be removed from your active events.`;
+  $('#delete-event-message').textContent = ''; $('#delete-event-dialog').showModal();
+});
+$('#delete-event-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (busy || !deleteTarget) return;
+  setBusy(true, $('#confirm-delete-event')); let removed = false;
+  try {
+    await api(`/api/events/${deleteTarget.id}/delete`, { expectedVersion: deleteTarget.version }); removed = true;
+    savedEvents = savedEvents.filter(e => e.id !== deleteTarget.id);
+    clearWorkspace(); persist(); $('#delete-event-dialog').close();
+    await restoreCloud(); notify('Event moved to Trash. You can restore it from Trash.');
+  } catch (error) {
+    if (removed) { render(); notify(`Event moved to Trash. The event list could not refresh: ${error.message}`, true); }
+    else $('#delete-event-message').textContent = error.message;
+  } finally { setBusy(false); }
+});
+async function refreshTrash() {
+  $('#trash-message').textContent = 'Loading deleted events…';
+  const { events } = await api('/api/events/trash');
+  $('#trash-message').textContent = '';
+  $('#trash-list').innerHTML = events.length ? events.map(e => `<div class="trash-row"><div><strong>${escape(e.name)}</strong><small>${escape(e.event_date)}</small></div><button class="button subtle small restore-event" data-id="${escape(e.id)}" data-version="${e.version}">Restore event</button></div>`).join('') : '<p>Trash is empty.</p>';
+}
+$('#open-trash').addEventListener('click', async () => {
+  if (busy || !auth.user) return;
+  $('#trash-list').replaceChildren(); $('#trash-dialog').showModal(); setBusy(true);
+  try { await refreshTrash(); } catch (error) { $('#trash-message').textContent = error.message; } finally { setBusy(false); }
+});
+$('#trash-list').addEventListener('click', async event => {
+  const button = event.target.closest('.restore-event'); if (!button || busy) return;
+  setBusy(true, button); let restored = false;
+  try {
+    adoptCloud(await api(`/api/events/${button.dataset.id}/restore`, { expectedVersion: Number(button.dataset.version) })); restored = true;
+    await refreshEventList(); $('#trash-dialog').close(); notify('Event restored with its saved team, shifts and schedule.');
+  } catch (error) {
+    if (restored) { $('#trash-dialog').close(); notify(`Event restored, but its list could not refresh: ${error.message}`, true); }
+    else $('#trash-message').textContent = error.message;
+  } finally { setBusy(false); }
+});
 function openEventDialog() {
+  $('#event-dialog h2').textContent = editingEvent ? 'Edit event & date.' : 'Make it your event.';
+  $('#event-dialog .eyebrow').textContent = editingEvent ? 'EVENT SETTINGS' : 'A NEW EVENT';
   $('#event-use-gemma').classList.toggle('hidden', editingEvent);
+  $('#delete-event').classList.toggle('hidden', !editingEvent || !currentEvent);
   $('#event-name').value = editingEvent ? state.event : ''; $('#event-date-input').value = state.date; $('#event-message').textContent = ''; $('#event-copy').checked = false; $('#event-copy-label').classList.toggle('hidden', editingEvent || !(state.volunteers.length || state.shifts.length)); $('#event-description').textContent = editingEvent ? 'Update the event name or date. Shift times stay in Dhaka.' : 'Create an event for your own team, shifts and schedule.'; $('#create-event-button').textContent = editingEvent ? 'Save event settings' : 'Create saved event'; $('#event-dialog').showModal();
 }
 $('#new-event').addEventListener('click', () => {
@@ -424,13 +483,13 @@ $('#event-form').addEventListener('submit', async event => {
 $('#event-select').addEventListener('change', async event => {
   if (busy) return;
   const id = event.target.value;
-  if (!id) { clearWorkspace(); render(); renderInterpretation(); renderPreview(); persist(); return; }
+  if (!id) { renderCloud(); return; }
   setBusy(true);
   try { adoptCloud(await api(`/api/events/${id}`)); clearNotice(); } catch (error) { notify(error.message, true); renderCloud(); } finally { setBusy(false); }
 });
 $('#reload-event').addEventListener('click', async () => {
-  if (busy || !currentEvent) return; setBusy(true, $('#reload-event'));
-  try { adoptCloud(await api(`/api/events/${currentEvent.id}`)); await refreshEventList(); notify('Loaded the latest accepted schedule from Supabase.'); } catch (error) { notify(error.message, true); } finally { setBusy(false); }
+  if (busy || !auth.user) return; setBusy(true, $('#reload-event'));
+  try { await restoreCloud(); notify('Loaded your latest saved events from Supabase.'); } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });
 eventSetup = initEventSetup({
   api, context: () => ({ auth, connection, busy, gemmaIssue }), setBusy,
@@ -451,22 +510,31 @@ voiceInputs = initVoiceInputs({
   requestConnection() { $('#setup-dialog').close(); $('#connection-dialog').showModal(); }
 });
 async function init() {
+  if (busy) return;
+  state ||= emptyWorkspace(); workspaceStatus('loading'); setBusy(true);
   if (/access_token=|refresh_token=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   try {
-    const [status, account] = await Promise.all([api('/api/status'), api('/api/auth/session')]);
-    state = emptyWorkspace(); connection = status; auth = account;
-    if (!auth.user) {
+    const [status, account] = await Promise.allSettled([api('/api/status'), api('/api/auth/session')]);
+    if (status.status === 'fulfilled') { connection = status.value; renderConnection(); }
+    if (account.status === 'rejected') throw account.reason;
+    auth = account.value;
+    if (auth.user) await restoreCloud();
+    else {
+      state = emptyWorkspace(); currentEvent = null;
       try {
         const saved = JSON.parse(localStorage.getItem(storageKey));
         if (saved && typeof saved.event === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(saved.date) && saved.timezone === 'Asia/Dhaka' && Array.isArray(saved.history) && saved.history.length <= 50) {
           validateData(saved.volunteers, saved.shifts, saved.schedule, { allowEmpty: true }); state = saved;
         }
-      } catch { /* Ignore invalid browser drafts and old demo preferences. */ }
+      } catch { /* Invalid local drafts do not affect saved cloud events. */ }
+      render();
     }
-    render(); renderConnection(); renderGemmaStatus();
+    renderConnection(); renderGemmaStatus(); workspaceStatus('ready');
     try { $('#request-input').value = sessionStorage.getItem('shiftrescue-request-draft') || ''; } catch {}
-    if (auth.user) await restoreCloud();
-  } catch (error) { notify(`Could not load the workspace: ${error.message}`, true); }
+    if (status.status === 'rejected') notify('Your saved events are open, but the Gemma connection could not be checked. You can continue editing manually.', true);
+  } catch (error) { workspaceStatus('error', `${error.message} Your saved events have not been deleted. Try opening them again.`); }
+  finally { setBusy(false); }
 }
+$('#retry-workspace').addEventListener('click', init);
 $('#request-input').addEventListener('input', () => { interpretation = null; preview = null; renderInterpretation(); renderPreview(); try { sessionStorage.setItem('shiftrescue-request-draft', $('#request-input').value); } catch {} });
 init();

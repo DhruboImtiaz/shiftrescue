@@ -1,4 +1,3 @@
-import { demo, scenarios } from './demo.mjs';
 import { editSchedule, checkSchedule, repairSchedule, retainValidAssignments, validateChanges, validateData } from './scheduler.mjs';
 import { callGemma, interpretRequest, interpretEventSetup, validateModel } from './gemma.mjs';
 import { compileSetupDraft } from './setup.mjs';
@@ -61,9 +60,13 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const state = normalizeSetup({ ...initial, event: String(input.name || '').trim(), date: input.date, timezone: 'Asia/Dhaka' });
           return send(201, await cloud.save(active, null, 0, state));
         }
-        const action = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/(apply|setup)$/i);
+        const action = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/(apply|setup|delete|restore)$/i);
         if (action) {
           const active = await cloud.session(req, res, true), id = action[1];
+          if (action[2] === 'delete' || action[2] === 'restore') {
+            const result = await cloud.setDeleted(active, id, input.expectedVersion, action[2] === 'delete');
+            return send(200, action[2] === 'restore' ? await cloud.load(active, id) : result);
+          }
           if (action[2] === 'apply') {
             const proof = tokens.read(input.proposalId, active.user.id, id);
             const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule, { assignments: proof.assignments || [], allowPartial: proof.mode === 'incremental' });
@@ -107,7 +110,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const people = stored?.state.volunteers || input.volunteers, shifts = stored?.state.shifts || input.shifts;
           const schedule = stored?.state.schedule || input.schedule || Object.fromEntries(shifts.map(s => [s.id, []]));
           validateData(people, shifts, schedule);
-          const result = await interpretRequest(config, input.request, people, shifts, stored?.state.date || input.date || demo.date, schedule);
+          const result = await interpretRequest(config, input.request, people, shifts, stored?.state.date || input.date, schedule);
           verified = true; return send(200, result);
         }
         if (pathname === '/api/repair') {
@@ -130,10 +133,10 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         return send(404, { error: 'Endpoint not found.' });
       }
       if (request.method !== 'GET') return send(405, { error: 'Method not supported.' });
-      if (pathname === '/api/demo') return send(200, { ...demo, scenarios });
       if (pathname === '/api/status') return send(200, { configured: !!config.key && config.key !== 'your_google_ai_studio_key_here', verified, model: config.model, managed: hosted || cloud.configured });
       if (pathname === '/api/auth/session') return send(200, { configured: cloud.configured, user: safeUser((await cloud.session(req, res))?.user) });
       if (pathname === '/api/events') return send(200, { events: await cloud.list(await cloud.session(req, res, true)) });
+      if (pathname === '/api/events/trash') return send(200, { events: await cloud.list(await cloud.session(req, res, true), { deleted: true }) });
       const event = pathname.match(/^\/api\/events\/([0-9a-f-]{36})$/i);
       if (event) return send(200, await cloud.load(await cloud.session(req, res, true), event[1]));
       return send(404, { error: 'Endpoint not found.' });

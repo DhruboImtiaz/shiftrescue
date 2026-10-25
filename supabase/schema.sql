@@ -6,10 +6,12 @@ create table public.shiftrescue_events (
   event_date date not null,
   timezone text not null default 'Asia/Dhaka' check (timezone = 'Asia/Dhaka'),
   version bigint not null default 1 check (version > 0),
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index shiftrescue_events_owner_updated_idx on public.shiftrescue_events(owner_id, updated_at desc);
+create index if not exists shiftrescue_events_active_owner_updated_idx on public.shiftrescue_events(owner_id, updated_at desc, id desc) where deleted_at is null;
+create index if not exists shiftrescue_events_trash_owner_updated_idx on public.shiftrescue_events(owner_id, updated_at desc, id desc) where deleted_at is not null;
 
 create table public.shiftrescue_volunteers (
   event_id uuid not null references public.shiftrescue_events(id) on delete cascade,
@@ -92,7 +94,7 @@ returns jsonb language sql stable security invoker set search_path = '' as $$
       'schedule', coalesce((select jsonb_object_agg(s.id, coalesce((select jsonb_agg(a.volunteer_id order by a.position) from public.shiftrescue_assignments a where a.event_id = e.id and a.shift_id = s.id), '[]'::jsonb)) from public.shiftrescue_shifts s where s.event_id = e.id), '{}'::jsonb),
       'history', coalesce((select jsonb_agg(h.entry order by h.created_at desc) from (select a.created_at, jsonb_build_object('at', a.created_at, 'title', a.title, 'text', a.description, 'source', a.source, 'kind', a.kind, 'differences', a.differences) as entry from public.shiftrescue_activity a where a.event_id = e.id order by a.created_at desc limit 50) h), '[]'::jsonb)
     )
-  ) from public.shiftrescue_events e where e.id = p_event_id;
+  ) from public.shiftrescue_events e where e.id = p_event_id and e.deleted_at is null;
 $$;
 
 -- Row locking via version-checked UPDATE prevents stale tabs overwriting new work.
@@ -116,7 +118,7 @@ begin
     returning id, version into v_event_id, v_next_version;
   else
     update public.shiftrescue_events e set name = p_state->>'event', event_date = (p_state->>'date')::date, timezone = p_state->>'timezone', version = e.version + 1, updated_at = now()
-    where e.id = p_event_id and e.owner_id = auth.uid() and e.version = p_expected_version
+    where e.id = p_event_id and e.owner_id = auth.uid() and e.version = p_expected_version and e.deleted_at is null
     returning e.id, e.version into v_event_id, v_next_version;
     if v_event_id is null then raise exception 'This event changed in another tab or is no longer available. Reload it before applying a repair.' using errcode = 'PT409'; end if;
   end if;
@@ -144,3 +146,28 @@ revoke all on function public.shiftrescue_load_event(uuid) from public, anon;
 revoke all on function public.shiftrescue_save_event(uuid, bigint, jsonb, jsonb) from public, anon;
 grant execute on function public.shiftrescue_load_event(uuid) to authenticated;
 grant execute on function public.shiftrescue_save_event(uuid, bigint, jsonb, jsonb) to authenticated;
+
+-- Recoverable deletion keeps the team and schedule intact. The row lock and
+-- version increment also invalidate previews made before deletion/restoration.
+create or replace function public.shiftrescue_set_event_deleted(p_event_id uuid, p_expected_version bigint, p_deleted boolean)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare
+  v_event public.shiftrescue_events%rowtype;
+begin
+  if auth.uid() is null then raise exception 'Sign in to manage events.' using errcode = '28000'; end if;
+  if p_deleted is null then raise exception 'Choose delete or restore.' using errcode = '22023'; end if;
+  select e.* into v_event from public.shiftrescue_events e
+  where e.id = p_event_id and e.owner_id = auth.uid() for update;
+  if not found then raise exception 'That event is not available to your account.' using errcode = 'PT404'; end if;
+  if v_event.version is distinct from p_expected_version then raise exception 'The event changed. Refresh before deleting or restoring it.' using errcode = 'PT409'; end if;
+  if (v_event.deleted_at is not null) = p_deleted then
+    return jsonb_build_object('id', v_event.id, 'version', v_event.version, 'deletedAt', v_event.deleted_at);
+  end if;
+  update public.shiftrescue_events e
+  set deleted_at = case when p_deleted then now() else null end, version = e.version + 1, updated_at = now()
+  where e.id = v_event.id returning e.* into v_event;
+  return jsonb_build_object('id', v_event.id, 'version', v_event.version, 'deletedAt', v_event.deleted_at);
+end;
+$$;
+revoke all on function public.shiftrescue_set_event_deleted(uuid, bigint, boolean) from public, anon;
+grant execute on function public.shiftrescue_set_event_deleted(uuid, bigint, boolean) to authenticated;
