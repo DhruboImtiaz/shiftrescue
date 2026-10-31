@@ -1,3 +1,4 @@
+import { MAX_PROPOSAL_CHARACTERS } from './limits.mjs';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { AppError } from './cloud.mjs';
 
@@ -14,7 +15,7 @@ export function proposalTokens(secret, now = () => Date.now()) {
     },
     read(token, userId, eventId) {
       const expired = () => new AppError('This repair preview expired or belongs to another event. Generate a new preview.', 409);
-      if (typeof token !== 'string' || token.length > 60000) throw expired();
+      if (typeof token !== 'string' || token.length > MAX_PROPOSAL_CHARACTERS) throw expired();
       const [payload, signature, extra] = token.split('.');
       if (!payload || !signature || extra) throw expired();
       const expected = Buffer.from(sign(payload)); const supplied = Buffer.from(signature);

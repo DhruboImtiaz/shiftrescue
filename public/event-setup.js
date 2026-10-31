@@ -1,3 +1,4 @@
+import { MAX_VOLUNTEERS, MAX_SHIFTS, MAX_PEOPLE_PER_SHIFT, MAX_SETUP_TEXT } from '/limits.mjs';
 import { reviewSetupDraft, compileSetupDraft } from '/setup.mjs';
 import { checkSchedule } from '/scheduler.mjs';
 import { initPhotoInput } from '/photo.js';
@@ -26,7 +27,7 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
     const remaining = gemmaIssue?.retryAt ? Math.max(0, Date.parse(gemmaIssue.retryAt) - Date.now()) : 0;
     $('#draft-event-button').disabled = busy || photo.processing || remaining > 0;
     $('#confirm-setup').disabled = busy;
-    $('#setup-description-count').textContent = `${$('#setup-description').value.length.toLocaleString()} / 8,000 characters`;
+    $('#setup-description-count').textContent = `${$('#setup-description').value.length.toLocaleString()} / ${MAX_SETUP_TEXT.toLocaleString()} characters`;
     const warning = $('#setup-gemma-status');
     warning.classList.toggle('hidden', !gemmaIssue);
     if (gemmaIssue) {
@@ -37,8 +38,8 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
     photo.disable(busy);
     $('#setup-dialog').querySelectorAll('.setup-add, .setup-remove, #setup-review-form input').forEach(el => { el.disabled = busy; });
     if (result) {
-      $('#setup-add-person').disabled = busy || $('#setup-people').querySelectorAll('.setup-person').length >= 12;
-      $('#setup-add-shift').disabled = busy || $('#setup-shifts').querySelectorAll('.setup-shift-draft').length >= 8;
+      $('#setup-add-person').disabled = busy || $('#setup-people').querySelectorAll('.setup-person').length >= MAX_VOLUNTEERS;
+      $('#setup-add-shift').disabled = busy || $('#setup-shifts').querySelectorAll('.setup-shift-draft').length >= MAX_SHIFTS;
     }
   }
   function readDraft() {
@@ -85,9 +86,9 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
     $('#setup-resolved-label').classList.toggle('hidden', !result.questions.length);
     $('#setup-event-name').value = draft.event || ''; $('#setup-event-date').value = draft.date || '';
     $('#setup-people').innerHTML = draft.volunteers.map((p, i) => `<fieldset class="setup-person setup-entry"><legend>Volunteer ${i + 1}</legend><div class="setup-fields">${field('Name', 'name', p.name, 'maxlength="60" autocomplete="off"')}${field('Skills (or none)', 'skills', skillsText(p.skills), 'maxlength="250" placeholder="first-aid, or none"')}${field('Availability (or none)', 'availability', p.availability === null ? '' : p.availability.map(a => a.join('-')).join(', ') || 'none', 'maxlength="500" placeholder="10:00-12:00, 14:00-16:00"')}${field('Maximum working hours', 'maxHours', p.maxHours, 'type="number" min="0" max="24" step="any"')}</div><button type="button" class="button subtle small setup-remove" data-kind="volunteers" data-index="${i}">Remove volunteer ${i + 1}</button></fieldset>`).join('');
-    $('#setup-shifts').innerHTML = draft.shifts.map((s, i) => `<fieldset class="setup-shift-draft setup-entry"><legend>Shift ${i + 1}</legend><div class="setup-fields">${field('Station or task', 'station', s.station, 'maxlength="80"')}${field('People required', 'required', s.required, 'type="number" min="1" max="3" step="1"')}${field('Start (24-hour)', 'start', s.start, 'maxlength="5" placeholder="10:00"')}${field('End (24-hour)', 'end', s.end, 'maxlength="5" placeholder="12:00"')}${field('Required skills (or none)', 'skills', skillsText(s.skills), 'maxlength="250" placeholder="first-aid, or none"')}</div><button type="button" class="button subtle small setup-remove" data-kind="shifts" data-index="${i}">Remove shift ${i + 1}</button></fieldset>`).join('');
-    $('#setup-add-person').disabled = draft.volunteers.length >= 12;
-    $('#setup-add-shift').disabled = draft.shifts.length >= 8;
+    $('#setup-shifts').innerHTML = draft.shifts.map((s, i) => `<fieldset class="setup-shift-draft setup-entry"><legend>Shift ${i + 1}</legend><div class="setup-fields">${field('Station or task', 'station', s.station, 'maxlength="80"')}${field('People required', 'required', s.required, `type="number" min="1" max="${MAX_PEOPLE_PER_SHIFT}" step="1"`)}${field('Start (24-hour)', 'start', s.start, 'maxlength="5" placeholder="10:00"')}${field('End (24-hour)', 'end', s.end, 'maxlength="5" placeholder="12:00"')}${field('Required skills (or none)', 'skills', skillsText(s.skills), 'maxlength="250" placeholder="first-aid, or none"')}</div><button type="button" class="button subtle small setup-remove" data-kind="shifts" data-index="${i}">Remove shift ${i + 1}</button></fieldset>`).join('');
+    $('#setup-add-person').disabled = draft.volunteers.length >= MAX_VOLUNTEERS;
+    $('#setup-add-shift').disabled = draft.shifts.length >= MAX_SHIFTS;
     renderAssignments(draft);
     validateReview();
   }
@@ -131,8 +132,8 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
       draft[button.dataset.kind].splice(index, 1);
       draft.assignments = draft.assignments.filter(a => a[key] !== index).map(a => ({ ...a, [key]: a[key] > index ? a[key] - 1 : a[key] }));
     }
-    else if (button.id === 'setup-add-person' && draft.volunteers.length < 12) draft.volunteers.push({ name: null, skills: null, availability: null, maxHours: null });
-    else if (button.id === 'setup-add-shift' && draft.shifts.length < 8) draft.shifts.push({ station: null, start: null, end: null, required: null, skills: null });
+    else if (button.id === 'setup-add-person' && draft.volunteers.length < MAX_VOLUNTEERS) draft.volunteers.push({ name: null, skills: null, availability: null, maxHours: null });
+    else if (button.id === 'setup-add-shift' && draft.shifts.length < MAX_SHIFTS) draft.shifts.push({ station: null, start: null, end: null, required: null, skills: null });
     result.draft = draft; renderReview();
   });
   $('#setup-review-form').addEventListener('submit', async event => {

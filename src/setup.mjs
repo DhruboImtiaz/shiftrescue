@@ -1,3 +1,4 @@
+import { MAX_VOLUNTEERS, MAX_SHIFTS, MAX_PEOPLE_PER_SHIFT, MAX_ASSIGNMENTS } from './limits.mjs';
 import { parseTime, validateData, checkSchedule } from './scheduler.mjs';
 
 // Shared by the model boundary, review form and save endpoint. Unknown is null;
@@ -5,7 +6,7 @@ import { parseTime, validateData, checkSchedule } from './scheduler.mjs';
 export function reviewSetupDraft(input) {
   const object = value => value && typeof value === 'object' && !Array.isArray(value);
   const invalid = () => { throw new Error('The event draft contains invalid structured data. Edit your description and try again.'); };
-  if (!object(input) || !Array.isArray(input.volunteers) || input.volunteers.length > 12 || !Array.isArray(input.shifts) || input.shifts.length > 8) invalid();
+  if (!object(input) || !Array.isArray(input.volunteers) || input.volunteers.length > MAX_VOLUNTEERS || !Array.isArray(input.shifts) || input.shifts.length > MAX_SHIFTS) invalid();
   const text = (value, max) => {
     if (value === null) return null;
     if (typeof value !== 'string' || value.length > max) invalid();
@@ -34,11 +35,12 @@ export function reviewSetupDraft(input) {
     }),
     shifts: input.shifts.map(s => {
       if (!object(s)) invalid();
-      return { station: text(s.station, 80), start: time(s.start), end: time(s.end), required: number(s.required, 3, true), skills: skills(s.skills) };
+      return { station: text(s.station, 80), start: time(s.start), end: time(s.end), required: number(s.required, MAX_PEOPLE_PER_SHIFT, true), skills: skills(s.skills) };
     })
   };
   const assignments = input.assignments ?? [];
-  if (!Array.isArray(assignments) || assignments.length > 24 || assignments.some(a => !object(a) || !Number.isInteger(a.volunteerIndex) || a.volunteerIndex < 0 || a.volunteerIndex >= draft.volunteers.length || !Number.isInteger(a.shiftIndex) || a.shiftIndex < 0 || a.shiftIndex >= draft.shifts.length)) invalid();
+  if (Array.isArray(assignments) && assignments.length > MAX_ASSIGNMENTS) throw new Error(`An event supports at most ${MAX_ASSIGNMENTS} placements across ${MAX_SHIFTS} shifts.`);
+  if (!Array.isArray(assignments) || assignments.some(a => !object(a) || !Number.isInteger(a.volunteerIndex) || a.volunteerIndex < 0 || a.volunteerIndex >= draft.volunteers.length || !Number.isInteger(a.shiftIndex) || a.shiftIndex < 0 || a.shiftIndex >= draft.shifts.length)) invalid();
   draft.assignments = assignments.map(({ volunteerIndex, shiftIndex }) => ({ volunteerIndex, shiftIndex }));
   const issues = [];
   if (new Set(assignments.map(a => `${a.volunteerIndex}:${a.shiftIndex}`)).size !== assignments.length) issues.push('Remove duplicate shift assignments.');
@@ -63,7 +65,7 @@ export function reviewSetupDraft(input) {
     if (!s.station) issues.push(`Add a station or task for shift ${i + 1}.`);
     if (s.start === null || s.end === null) issues.push(`${label}: provide exact start and end times.`);
     else if (parseTime(s.start) >= parseTime(s.end)) issues.push(`${label}: the shift must finish after it starts on the same day.`);
-    if (s.required === null) issues.push(`${label}: choose 1–3 people required.`);
+    if (s.required === null) issues.push(`${label}: choose 1–${MAX_PEOPLE_PER_SHIFT} people required.`);
     if (s.skills === null) issues.push(`${label}: confirm required skills, or enter “none”.`);
   });
   return { draft, issues };

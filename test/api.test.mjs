@@ -1,3 +1,4 @@
+import { MAX_EVENT_REQUEST_BYTES } from '../src/limits.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApi, normalizeSetup } from '../src/api.mjs';
@@ -19,7 +20,7 @@ test('same-origin HTTPS requests work while cross-site writes are rejected', asy
 });
 test('request size and malformed bodies are rejected before model calls', async () => {
   const api = createApi({});
-  assert.equal((await api(request('/api/interpret', { request: 'a'.repeat(81000) }))).status, 413);
+  assert.equal((await api(request('/api/interpret', { request: 'a'.repeat(MAX_EVENT_REQUEST_BYTES + 1) }))).status, 413);
   assert.equal((await api(request('/api/interpret', null))).status, 400);
 });
 test('quota errors reach the client with retry metadata and unchanged input', async t => {

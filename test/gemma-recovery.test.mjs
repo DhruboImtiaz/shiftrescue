@@ -76,7 +76,7 @@ test('both event setup and change interpretation retain their generation setting
     limits.push(generation.maxOutputTokens);
     assert.equal(generation.temperature, 0.1);
     assert.deepEqual(generation.thinkingConfig, { thinkingLevel: 'minimal' });
-    return generation.maxOutputTokens === 8192
+    return generation.maxOutputTokens === 16384
       ? answer(JSON.stringify({ status: 'ready', message: 'Review the event.', questions: [], draft }))
       : answer(JSON.stringify({ status: 'clarification', message: 'Which shift time do you mean?', changes: [] }));
   });
@@ -84,5 +84,5 @@ test('both event setup and change interpretation retain their generation setting
   const change = await interpretRequest(config, 'Assign Nadia to a shift.', demo.volunteers, demo.shifts);
   assert.equal(change.status, 'clarification');
   assert.deepEqual(change.changes, []);
-  assert.deepEqual(limits, [8192, 2048]);
+  assert.deepEqual(limits, [16384, 2048]);
 });

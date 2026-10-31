@@ -1,3 +1,4 @@
+import { MAX_EVENT_REQUEST_BYTES } from './limits.mjs';
 import { editSchedule, checkSchedule, repairSchedule, retainValidAssignments, validateChanges, validateData } from './scheduler.mjs';
 import { callGemma, interpretRequest, interpretEventSetup, validateModel } from './gemma.mjs';
 import { compileSetupDraft } from './setup.mjs';
@@ -12,7 +13,7 @@ export const securityHeaders = {
 };
 export function normalizeSetup(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('Provide the event setup to save.');
-  const next = structuredClone(input);
+  const next = { ...structuredClone(input), history: [] };
   validateData(next.volunteers, next.shifts, null, { allowEmpty: true });
   const ids = new Set(next.volunteers.map(p => p.id));
   next.schedule = Object.fromEntries(next.shifts.map(s => [s.id, [...new Set((next.schedule?.[s.id] || []).filter(id => ids.has(id)))].slice(0, s.required)]));
@@ -39,7 +40,8 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (request.headers.get('origin') && request.headers.get('origin') !== url.origin) throw new AppError('Requests must come from this app.', 403);
         if (request.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('Cross-site requests are not allowed.', 403);
         if (!String(request.headers.get('content-type') || '').startsWith('application/json')) throw new AppError('Expected an application/json request.', 415);
-        const bodyLimit = pathname === '/api/setup/photo' || pathname === '/api/profile' ? 2900000 : pathname === '/api/voice/transcribe' ? 1450000 : 80000;
+        const eventPayload = ['/api/events', '/api/repair', '/api/interpret', '/api/setup/create', '/api/setup/interpret'].includes(pathname) || /^\/api\/events\/[^/]+\/(setup|apply)$/.test(pathname);
+        const bodyLimit = pathname === '/api/setup/photo' || pathname === '/api/profile' ? 2900000 : pathname === '/api/voice/transcribe' ? 1450000 : eventPayload ? MAX_EVENT_REQUEST_BYTES : 80000;
         if (Number(request.headers.get('content-length')) > bodyLimit) throw new AppError('Request is too large.', 413);
         const reader = request.body?.getReader(); let size = 0; const chunks = [];
         if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > bodyLimit) { await reader.cancel(); throw new AppError('Request is too large.', 413); } chunks.push(Buffer.from(chunk.value)); }
