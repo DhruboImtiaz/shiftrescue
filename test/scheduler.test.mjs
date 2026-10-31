@@ -44,10 +44,13 @@ test('a search limit never claims infeasibility', () => {
   assert.equal(result.status, 'search_limit'); assert.equal(result.optimal, false);
 });
 test('a partial search with a solution does not claim optimality', () => {
-  const people = applyChanges(demo.volunteers, scenarios.sick.changes);
-  const result = repairSchedule(people, demo.shifts, demo.schedule, { maxNodes: 7 });
+  // This first feasible leaf does not meet the global cost/balance bounds.
+  const people = ['a', 'b', 'c'].map(id => ({ id, name: id, skills: [], availability: [[0, 1440]], maxHours: id === 'a' ? 3 : 6 }));
+  const shifts = Array.from({ length: 6 }, (_, i) => ({ id: `s-${i}`, station: 'Desk', start: i * 60, end: (i + 1) * 60, required: 1, skills: [] }));
+  const baseline = Object.fromEntries(shifts.map(s => [s.id, ['a']]));
+  const result = repairSchedule(people, shifts, baseline, { maxNodes: 7 });
   assert.equal(result.status, 'feasible'); assert.equal(result.optimal, false);
-  assert.equal(checkSchedule(people, demo.shifts, result.schedule).valid, true);
+  assert.equal(checkSchedule(people, shifts, result.schedule).valid, true);
 });
 test('equally small repairs prefer a balanced distribution of hours', () => {
   const people = ['a', 'b', 'c', 'd'].map(id => ({ id, name: id, skills: [], maxHours: 2, availability: ['a', 'b'].includes(id) ? [] : [[600, 720]] }));

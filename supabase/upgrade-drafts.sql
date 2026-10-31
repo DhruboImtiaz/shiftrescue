@@ -11,8 +11,8 @@ begin
   if jsonb_typeof(p_state->'volunteers') is distinct from 'array' or jsonb_typeof(p_state->'shifts') is distinct from 'array' or jsonb_typeof(p_state->'schedule') is distinct from 'object' then
     raise exception 'Invalid event data.' using errcode = '22023';
   end if;
-  if jsonb_array_length(p_state->'volunteers') not between 0 and 12 or jsonb_array_length(p_state->'shifts') not between 0 and 8 or octet_length(p_state::text) > 120000 then
-    raise exception 'Event exceeds prototype limits.' using errcode = '22023';
+  if jsonb_array_length(p_state->'volunteers') not between 0 and 80 or jsonb_array_length(p_state->'shifts') not between 0 and 24 or octet_length(p_state::text) > 524288 then
+    raise exception 'Event exceeds the 80-volunteer, 24-shift or data-size limits.' using errcode = '22023';
   end if;
   if p_event_id is null then
     insert into public.shiftrescue_events(owner_id, name, event_date, timezone)

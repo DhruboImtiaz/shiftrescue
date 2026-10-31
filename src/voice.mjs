@@ -1,3 +1,4 @@
+import { MAX_VOLUNTEERS, MAX_SHIFTS } from './limits.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { quotaDetails, GemmaQuotaError } from './quota.mjs';
 
@@ -19,7 +20,7 @@ export function validateVoiceInput(input) {
 export async function transcribeVoice({ key }, input, vocabulary = []) {
   const { audio, mimeType, language } = validateVoiceInput(input);
   if (!key || key === 'your_google_ai_studio_key_here') throw new Error('Connect your Google AI Studio key before using voice input. You can still type your request.');
-  const terms = [...new Set(vocabulary.filter(term => typeof term === 'string' && term.trim() && term.length <= 80))].slice(0, 40);
+  const terms = [...new Set(vocabulary.filter(term => typeof term === 'string' && term.trim() && term.length <= 80))].slice(0, MAX_VOLUNTEERS * 2 + MAX_SHIFTS * 2);
   const signal = AbortSignal.timeout(45000);
   const body = JSON.stringify({ model: voiceModel, store: false, input: [{ type: 'audio', data: audio, mime_type: mimeType }], generation_config: { transcription_config: { language_codes: language === 'auto' ? [] : [language], ...(terms.length ? { custom_vocabulary: terms } : {}) } } });
   const timeout = () => Object.assign(new Error('Voice transcription took too long. Your text and saved schedule are unchanged; please try again.'), { status: 504 });

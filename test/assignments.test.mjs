@@ -1,3 +1,4 @@
+import { MAX_CHANGES } from '../src/limits.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyChanges, checkSchedule, repairSchedule, validateChanges } from '../src/scheduler.mjs';
@@ -44,7 +45,7 @@ test('unknown volunteer and shift IDs are rejected before solving', () => {
   assert.throws(() => validateChanges([assign('missing', 'a1')], state.volunteers, state.shifts), /unknown volunteer/);
   assert.throws(() => validateChanges([assign('s1', 'missing')], state.volunteers, state.shifts), /unknown shift/);
   assert.throws(() => repairSchedule(state.volunteers, state.shifts, state.schedule, { assignments: [assign('s1', 'missing')] }), /unknown shift/);
-  assert.throws(() => validateChanges(Array(25).fill(assign('s1', 'a1')), state.volunteers, state.shifts), /24 changes/);
+  assert.throws(() => validateChanges(Array(MAX_CHANGES + 1).fill(assign('s1', 'a1')), state.volunteers, state.shifts), /384 changes/);
 });
 
 test('requesting an unavailable volunteer returns a conflict instead of dropping the assignment', () => {

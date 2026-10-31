@@ -18,6 +18,7 @@ if (!env.PROPOSAL_SECRET || /replace_with|your_random_secret/i.test(env.PROPOSAL
 const handle = createApi(env, { saveConnection: async proposed => { fileConfig.GEMINI_API_KEY = proposed.key; fileConfig.GEMMA_MODEL = proposed.model; await saveEnv(); } });
 const port = Number(env.PORT || 5173);
 const assets = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/app.js', ['app.js', 'text/javascript; charset=utf-8']], ['/scheduler.mjs', ['../src/scheduler.mjs', 'text/javascript; charset=utf-8']], ['/styles.css', ['styles.css', 'text/css; charset=utf-8']], ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]]);
+assets.set('/limits.mjs', ['../src/limits.mjs', 'text/javascript; charset=utf-8']);
 assets.set('/setup.mjs', ['../src/setup.mjs', 'text/javascript; charset=utf-8']);
 assets.set('/event-setup.js', ['event-setup.js', 'text/javascript; charset=utf-8']);
 assets.set('/voice.js', ['voice.js', 'text/javascript; charset=utf-8']);

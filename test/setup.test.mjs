@@ -46,8 +46,8 @@ test('drafts reject duplicate names, invalid dates, reversed intervals and capac
     d => { d.date = '2026-02-31'; },
     d => { d.volunteers[0].availability = [['14:00', '10:00']]; },
     d => { d.shifts[0].end = '09:00'; },
-    d => { d.volunteers = Array.from({ length: 13 }, () => d.volunteers[0]); },
-    d => { d.shifts[0].required = 4; },
+    d => { d.volunteers = Array.from({ length: 81 }, () => d.volunteers[0]); },
+    d => { d.shifts[0].required = 9; },
     d => { d.volunteers[0].maxHours = '4'; },
     d => { d.volunteers[0].skills = ['<script>']; },
     d => { d.shifts[0].start = 'after 2'; }
@@ -66,7 +66,7 @@ test('Gemma creates a draft without assigning people and downgrades incomplete r
   t.mock.method(globalThis, 'fetch', async (_url, options) => { prompt = JSON.parse(options.body); return modelResponse({ status: 'ready', message: 'Your event', questions: [], draft: partial }); });
   const result = await interpretEventSetup(config, 'My event description', '2026-10-18');
   assert.equal(result.status, 'clarification'); assert.equal(result.draft.volunteers[0].maxHours, null); assert.equal(result.source, 'gemma');
-  assert.match(prompt.contents[0].parts[0].text, /2026-10-18/); assert.equal(prompt.generationConfig.maxOutputTokens, 8192);
+  assert.match(prompt.contents[0].parts[0].text, /2026-10-18/); assert.equal(prompt.generationConfig.maxOutputTokens, 16384);
 });
 test('Gemma clarification retains known fields and unsupported-rule questions', async t => {
   t.mock.method(globalThis, 'fetch', async () => modelResponse({ status: 'clarification', message: 'Please review', questions: ['Required breaks are unsupported. Can you remove that requirement?'], draft: draft() }));
@@ -81,8 +81,8 @@ test('malformed and truncated setup responses fail without silently saving a par
 });
 test('setup enforces the description limit before calling Google', async t => {
   let calls = 0; t.mock.method(globalThis, 'fetch', async () => { calls++; return modelResponse({}); });
-  await assert.rejects(interpretEventSetup(config, 'x'.repeat(8001), '2026-10-18'), /8,000/);
-  await assert.rejects(interpretEventSetup(config, '   ', '2026-10-18'), /8,000/);
+  await assert.rejects(interpretEventSetup(config, 'x'.repeat(32001), '2026-10-18'), /32,000/);
+  await assert.rejects(interpretEventSetup(config, '   ', '2026-10-18'), /32,000/);
   assert.equal(calls, 0);
 });
 test('hosted setup parsing and event creation both require sign-in before model/database access', async t => {

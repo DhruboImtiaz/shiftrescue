@@ -1,3 +1,4 @@
+import { MAX_VOLUNTEERS, MAX_SHIFTS } from '/limits.mjs';
 import { checkSchedule, clock, parseTime, retainValidAssignments, validateData } from '/scheduler.mjs';
 import { initEventSetup } from '/event-setup.js';
 import { initVoiceInputs } from '/voice.js';
@@ -144,7 +145,7 @@ function renderMetrics() {
   $('#schedule-status').textContent = check.valid ? 'All covered' : state.shifts.length ? 'In progress' : 'No shifts yet';
   $('[data-view=board] .nav-count').textContent = state.shifts.length;
   $('[data-view=team] .nav-count').textContent = state.volunteers.length;
-  $('#team-count').textContent = `${state.volunteers.length} / 12 volunteers`;
+  $('#team-count').textContent = `${state.volunteers.length} / ${MAX_VOLUNTEERS} volunteers`;
   $('#generate-schedule').textContent = check.valid ? 'Check & rebalance' : 'Complete schedule';
   $('#schedule-status').className = `badge ${check.valid ? 'green' : 'rose'}`;
   $('#history-count').textContent = state.history.length;
@@ -270,7 +271,7 @@ $('#assignment-form').addEventListener('submit', async event => {
 });
 function openEditor(id = null) {
   if (busy) return;
-  if (!id && state.volunteers.length >= 12) { notify('This prototype supports up to 12 volunteers per event.', true); return; }
+  if (!id && state.volunteers.length >= MAX_VOLUNTEERS) { notify(`Each event supports up to ${MAX_VOLUNTEERS} volunteers.`, true); return; }
   editingId = id; const p = id ? person(id) : { name: '', skills: ['welcome'], availability: [[600, 960]], maxHours: 4 };
   $('#edit-title').textContent = id ? `Edit ${p.name}` : 'Add volunteer'; $('#edit-name').value = p.name;
   $('#edit-availability').value = p.availability.map(([a, b]) => `${clock(a)}-${clock(b)}`).join(', ');
@@ -286,7 +287,7 @@ function draftState(next) {
 async function saveSetup(next) {
   next = draftState(next); setBusy(true);
   try {
-    if (currentEvent) { adoptCloud(await api(`/api/events/${currentEvent.id}/setup`, { state: next, expectedVersion: currentEvent.version })); await refreshEventList(); }
+    if (currentEvent) { adoptCloud(await api(`/api/events/${currentEvent.id}/setup`, { state: { ...next, history: [] }, expectedVersion: currentEvent.version })); await refreshEventList(); }
     else { next.history.unshift({ at: new Date().toISOString(), kind: 'setup', title: 'Event setup updated', text: 'Updated the team or shifts.', source: 'team', differences: [] }); next.history = next.history.slice(0, 50); state = next; preview = null; interpretation = null; persist(); render(); renderPreview(); renderInterpretation(); }
     const ready = state.shifts.length && checkSchedule(state.volunteers, state.shifts, state.schedule).valid;
     notify(ready ? 'Setup saved. Every shift is covered.' : 'Setup saved. Unaffected assignments were kept. Fill open places one at a time or choose Complete schedule.');
@@ -298,7 +299,7 @@ function renderShifts() {
 }
 function openShift(id = null) {
   if (busy) return;
-  if (!id && state.shifts.length >= 8) { notify('This prototype supports up to 8 shifts per event.', true); return; }
+  if (!id && state.shifts.length >= MAX_SHIFTS) { notify(`Each event supports up to ${MAX_SHIFTS} shifts.`, true); return; }
   editingShiftId = id; const s = state.shifts.find(s => s.id === id) || { station: '', start: 600, end: 720, required: 2, skills: [] };
   $('#shift-title').textContent = id ? 'Edit shift' : 'Add shift'; $('#shift-station').value = s.station; $('#shift-start').value = clock(s.start); $('#shift-end').value = clock(s.end); $('#shift-required').value = s.required; $('#shift-skills').value = s.skills.join(', '); $('#shift-message').textContent = ''; $('#delete-shift').classList.toggle('hidden', !id); $('#shift-dialog').showModal();
 }
@@ -483,7 +484,7 @@ $('#event-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return; setBusy(true, $('#create-event-button'));
   try {
     if (editingEvent) { await saveSetup({ ...state, event: $('#event-name').value.trim(), date: $('#event-date-input').value }); $('#event-dialog').close(); return; }
-    const saved = await api('/api/events', { name: $('#event-name').value.trim(), date: $('#event-date-input').value, ...($('#event-copy').checked ? { state } : {}) });
+    const saved = await api('/api/events', { name: $('#event-name').value.trim(), date: $('#event-date-input').value, ...($('#event-copy').checked ? { state: { ...state, history: [] } } : {}) });
     adoptCloud(saved); await refreshEventList(); $('#event-dialog').close(); notify('Event saved to Supabase. Accepted repairs now update this cloud event.');
   } catch (error) { $('#event-message').textContent = error.message; } finally { setBusy(false); }
 });

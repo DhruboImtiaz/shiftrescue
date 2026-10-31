@@ -1,3 +1,5 @@
+import { MAX_VOLUNTEERS, MAX_SHIFTS, MAX_PEOPLE_PER_SHIFT, MAX_CHANGES } from './limits.mjs';
+
 export const clock = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 export const overlap = (a, b) => a.start < b.end && b.start < a.end;
 export function available(person, shift) {
@@ -18,7 +20,7 @@ export function parseTime(value) {
 }
 
 export function validateData(volunteers, shifts, schedule = null, { allowEmpty = false } = {}) {
-  if (!Array.isArray(volunteers) || (!allowEmpty && volunteers.length < 1) || volunteers.length > 12 || !Array.isArray(shifts) || (!allowEmpty && shifts.length < 1) || shifts.length > 8) throw new Error('This prototype supports 1–12 volunteers and 1–8 shifts.');
+  if (!Array.isArray(volunteers) || (!allowEmpty && volunteers.length < 1) || volunteers.length > MAX_VOLUNTEERS || !Array.isArray(shifts) || (!allowEmpty && shifts.length < 1) || shifts.length > MAX_SHIFTS) throw new Error(`Events support up to ${MAX_VOLUNTEERS} volunteers and ${MAX_SHIFTS} shifts.`);
   const ids = new Set();
   for (const p of volunteers) {
     if (!p || typeof p.id !== 'string' || !/^[a-z0-9-]{1,40}$/.test(p.id) || ids.has(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60) throw new Error('Every volunteer needs a unique ID and a name.');
@@ -29,14 +31,14 @@ export function validateData(volunteers, shifts, schedule = null, { allowEmpty =
   }
   const shiftIds = new Set();
   for (const s of shifts) {
-    if (!s || typeof s.id !== 'string' || !/^[a-z0-9-]{1,40}$/.test(s.id) || shiftIds.has(s.id) || typeof s.station !== 'string' || !s.station.trim() || s.station.length > 80 || !Number.isInteger(s.start) || !Number.isInteger(s.end) || s.start < 0 || s.end > 1440 || s.start >= s.end || !Number.isInteger(s.required) || s.required < 1 || s.required > 3 || !Array.isArray(s.skills) || s.skills.length > 8 || s.skills.some(x => typeof x !== 'string' || !/^[a-z-]{1,30}$/.test(x))) throw new Error('Invalid shift definition.');
+    if (!s || typeof s.id !== 'string' || !/^[a-z0-9-]{1,40}$/.test(s.id) || shiftIds.has(s.id) || typeof s.station !== 'string' || !s.station.trim() || s.station.length > 80 || !Number.isInteger(s.start) || !Number.isInteger(s.end) || s.start < 0 || s.end > 1440 || s.start >= s.end || !Number.isInteger(s.required) || s.required < 1 || s.required > MAX_PEOPLE_PER_SHIFT || !Array.isArray(s.skills) || s.skills.length > 8 || s.skills.some(x => typeof x !== 'string' || !/^[a-z-]{1,30}$/.test(x))) throw new Error('Invalid shift definition.');
     shiftIds.add(s.id);
   }
-  if (schedule !== null && (typeof schedule !== 'object' || Array.isArray(schedule) || !schedule || Object.keys(schedule).some(id => !shiftIds.has(id)) || shifts.some(s => !Array.isArray(schedule[s.id]) || schedule[s.id].length > 12 || schedule[s.id].some(id => !ids.has(id))))) throw new Error('Invalid schedule assignments.');
+  if (schedule !== null && (typeof schedule !== 'object' || Array.isArray(schedule) || !schedule || Object.keys(schedule).some(id => !shiftIds.has(id)) || shifts.some(s => !Array.isArray(schedule[s.id]) || schedule[s.id].length > MAX_PEOPLE_PER_SHIFT || schedule[s.id].some(id => !ids.has(id))))) throw new Error('Invalid schedule assignments.');
 }
 
 export function validateChanges(changes, volunteers, shifts = []) {
-  if (!Array.isArray(changes) || changes.length > 24) throw new Error('Provide at most 24 changes at once.');
+  if (!Array.isArray(changes) || changes.length > MAX_CHANGES) throw new Error(`Provide at most ${MAX_CHANGES} changes at once.`);
   for (const c of changes) {
     if (!c || !volunteers.some(p => p.id === c.volunteerId)) throw new Error('The request names an unknown volunteer. Please choose someone on this team.');
     if (c.type === 'unavailable') {
@@ -137,64 +139,129 @@ export function editSchedule(people, shifts, baseline, changes) {
   return { mode: 'incremental', status: validation.complete ? 'feasible' : 'partial', complete: validation.complete, schedule, volunteers, assignments, changes: structuredClone(changes), differences, warnings: validation.warnings, openPlaces: shifts.reduce((n, s) => n + s.required - schedule[s.id].length, 0), changedAssignments: differences.reduce((n, d) => n + Math.max(d.added.length, d.removed.length), 0), workloads: validation.workloads };
 }
 
-function combinations(items, count, start = 0, chosen = [], result = []) {
-  if (chosen.length === count) { result.push([...chosen]); return result; }
-  for (let i = start; i <= items.length - (count - chosen.length); i++) {
-    chosen.push(items[i]); combinations(items, count, i + 1, chosen, result); chosen.pop();
-  }
-  return result;
-}
-
+// Search staffing groups lazily instead of materializing n-choose-k groups.
+// Both group generation and the event search share the same wall-clock budget.
 export function repairSchedule(volunteers, shifts, baseline, { assignments = [], maxNodes = 600000, maxMs = 1500 } = {}) {
   validateData(volunteers, shifts, baseline);
   validateAssignments(assignments, volunteers, shifts);
   const begin = performance.now(), personById = new Map(volunteers.map(p => [p.id, p]));
+  let nodes = 0, interrupted = false, proven = false, best = null, bestCost = Infinity, bestBalance = Infinity;
   const diagnostics = [];
-  const ordered = shifts.map(s => {
+  const timedOut = () => {
+    if (performance.now() - begin >= maxMs) interrupted = true;
+    return interrupted;
+  };
+  const result = () => {
+    if (!best) return { status: interrupted ? 'search_limit' : 'infeasible', optimal: !interrupted, schedule: null, diagnostics: diagnostics.length ? diagnostics : [interrupted ? 'The search limit was reached before a valid schedule was found. This does not prove the request is impossible. Keep your current plan, assign places manually, or adjust the constraints and retry.' : 'The requested assignments conflict with availability, overlapping shifts, skill requirements or hour limits. Adjust the placements or constraints.'], nodes, elapsedMs: Math.round(performance.now() - begin) };
+    const validation = checkSchedule(volunteers, shifts, best, { assignments });
+    if (!validation.valid) throw new Error('Internal validation rejected the proposed schedule. The original schedule was preserved.');
+    return { status: 'feasible', optimal: proven || !interrupted, schedule: best, changedAssignments: bestCost, differences: scheduleDifferences(shifts, baseline, best), workloads: validation.workloads, nodes, elapsedMs: Math.round(performance.now() - begin), diagnostics: [] };
+  };
+  if (maxNodes <= 0 || maxMs <= 0) { interrupted = true; return result(); }
+  const ordered = [];
+  for (const s of shifts) {
+    if (timedOut()) return result();
     const requested = [...new Set(assignments.filter(c => c.type === 'assign' && c.shiftId === s.id).map(c => c.volunteerId))];
     const excluded = new Set(assignments.filter(c => c.type === 'unassign' && c.shiftId === s.id).map(c => c.volunteerId));
-    const eligible = volunteers.filter(p => available(p, s) && p.maxHours * 60 >= s.end - s.start);
-    for (const skill of s.skills) if (!eligible.some(p => p.skills.includes(skill))) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: no available volunteer with ${skill} training and enough hours for this shift.`);
+    const eligible = volunteers.filter(p => !excluded.has(p.id) && available(p, s) && p.maxHours * 60 >= s.end - s.start).map(p => p.id);
+    for (const skill of s.skills) if (!eligible.some(id => personById.get(id).skills.includes(skill))) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: no available volunteer with ${skill} training and enough hours for this shift.`);
     if (eligible.length < s.required) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: ${eligible.length} eligible volunteers for ${s.required} places.`);
-    const options = combinations(eligible.map(p => p.id), s.required)
-      .filter(ids => requested.every(id => ids.includes(id)) && !ids.some(id => excluded.has(id)) && s.skills.every(skill => ids.some(id => personById.get(id).skills.includes(skill))))
-      .map(ids => ({ ids, cost: (baseline[s.id] || []).filter(id => !ids.includes(id)).length }))
-      .sort((a, b) => a.cost - b.cost);
-    if (requested.length && !options.length) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: assigning ${requested.map(id => personById.get(id).name).join(', ')} cannot satisfy this shift’s staffing, availability, skills and hour limits.`);
-    return { ...s, options };
-  }).sort((a, b) => a.options.length - b.options.length || a.start - b.start);
-  if (ordered.some(s => !s.options.length)) return { status: 'infeasible', optimal: true, schedule: null, diagnostics, nodes: 0, elapsedMs: Math.round(performance.now() - begin) };
+    if (requested.length > s.required || requested.some(id => !eligible.includes(id))) diagnostics.push(`${s.station}, ${clock(s.start)}–${clock(s.end)}: assigning ${requested.map(id => personById.get(id).name).join(', ')} cannot satisfy this shift’s staffing, availability and hour limits.`);
+    const skills = [...new Set(s.skills)], fullMask = (1 << skills.length) - 1;
+    const masks = new Map(eligible.map(id => [id, skills.reduce((mask, skill, index) => mask | (personById.get(id).skills.includes(skill) ? 1 << index : 0), 0)]));
+    const old = new Set(baseline[s.id] || []), fixedOld = requested.filter(id => old.has(id)).length;
+    const optionalOld = eligible.filter(id => old.has(id) && !requested.includes(id)).length;
+    const minCost = Math.max(0, old.size - fixedOld - Math.min(Math.max(0, s.required - requested.length), optionalOld));
+    // Logarithms provide a bounded estimate for choosing the tightest shift.
+    let weight = 0;
+    const n = eligible.length - requested.length, k = Math.min(s.required - requested.length, n - s.required + requested.length);
+    for (let i = 1; i <= k; i++) weight += Math.log(n - i + 1) - Math.log(i);
+    ordered.push({ ...s, eligible, requested, masks, fullMask, old, minCost, weight });
+  }
+  if (diagnostics.length) return result();
+  // These are necessary conditions, so failing them proves a conflict.
+  for (const time of new Set(shifts.map(s => s.start))) {
+    const active = ordered.filter(s => s.start <= time && time < s.end);
+    const needed = active.reduce((sum, s) => sum + s.required, 0);
+    const pool = new Set(active.flatMap(s => s.eligible));
+    if (needed > pool.size) diagnostics.push(`${clock(time)}: ${needed} places overlap, but only ${pool.size} eligible volunteers can cover those shifts.`);
+  }
+  const requiredMinutes = shifts.reduce((sum, s) => sum + (s.end - s.start) * s.required, 0);
+  if (requiredMinutes > volunteers.reduce((sum, p) => sum + p.maxHours * 60, 0) + 1e-8) diagnostics.push('The shifts require more volunteer hours than the team’s total hour limits allow.');
+  if (diagnostics.length) return result();
+  ordered.sort((a, b) => a.weight - b.weight || a.start - b.start);
+  const lower = Array(ordered.length + 1).fill(0);
+  for (let i = ordered.length - 1; i >= 0; i--) lower[i] = lower[i + 1] + ordered[i].minCost;
   const minutes = Object.fromEntries(volunteers.map(p => [p.id, 0]));
   const assignedShifts = Object.fromEntries(volunteers.map(p => [p.id, []]));
   const current = {};
-  const lower = Array(ordered.length + 1).fill(0);
-  for (let i = ordered.length - 1; i >= 0; i--) lower[i] = lower[i + 1] + ordered[i].options[0].cost;
-  let best = null, bestCost = Infinity, bestBalance = Infinity, nodes = 0, interrupted = false;
+  const gcd = (a, b) => b ? gcd(b, a % b) : a;
+  const quantum = shifts.reduce((unit, s) => gcd(unit, s.end - s.start), 0) || 1;
+  const activeCount = new Set(ordered.flatMap(s => s.eligible)).size || 1;
+  const units = requiredMinutes / quantum, q = Math.floor(units / activeCount), remainder = units % activeCount;
+  const balanceLower = ((activeCount - remainder) * q * q + remainder * (q + 1) ** 2) * quantum ** 2;
+  const canUse = (id, s) => minutes[id] + s.end - s.start <= personById.get(id).maxHours * 60 + 1e-8 && !assignedShifts[id].some(other => overlap(s, other));
+  const bits = value => { let n = 0; for (; value; value &= value - 1) n++; return n; };
+  function* groups(s, cost, futureLower) {
+    if (s.requested.some(id => !canUse(id, s))) return;
+    const fixed = new Set(s.requested);
+    const pool = s.eligible.filter(id => !fixed.has(id) && canUse(id, s)).sort((a, b) => Number(s.old.has(b)) - Number(s.old.has(a)) || minutes[a] - minutes[b] || a.localeCompare(b));
+    const remaining = s.required - fixed.size;
+    if (pool.length < remaining) return;
+    const initialMask = s.requested.reduce((mask, id) => mask | s.masks.get(id), 0);
+    // Try a low-change, skill-covering, balanced group before branching.
+    const greedy = [...s.requested]; let mask = initialMask;
+    while (mask !== s.fullMask && greedy.length < s.required) {
+      const next = pool.filter(id => !greedy.includes(id) && (s.masks.get(id) & ~mask)).sort((a, b) => Number(s.old.has(b)) - Number(s.old.has(a)) || bits(s.masks.get(b) & ~mask) - bits(s.masks.get(a) & ~mask) || minutes[a] - minutes[b] || a.localeCompare(b))[0];
+      if (!next) break;
+      greedy.push(next); mask |= s.masks.get(next);
+    }
+    const fillers = [...pool].sort((a, b) => Number(s.old.has(b)) - Number(s.old.has(a)) || Number(s.masks.get(a) !== 0) - Number(s.masks.get(b) !== 0) || minutes[a] - minutes[b] || a.localeCompare(b));
+    for (const id of fillers) if (greedy.length < s.required && !greedy.includes(id)) greedy.push(id);
+    let greedyKey = null;
+    if (greedy.length === s.required && mask === s.fullMask) { greedyKey = [...greedy].sort().join('|'); yield greedy; }
+    const suffix = Array(pool.length + 1).fill(0), suffixOld = Array(pool.length + 1).fill(0);
+    for (let i = pool.length - 1; i >= 0; i--) { suffix[i] = suffix[i + 1] | s.masks.get(pool[i]); suffixOld[i] = suffixOld[i + 1] + Number(s.old.has(pool[i])); }
+    const chosen = [...s.requested];
+    function* choose(start, covered) {
+      if (proven || timedOut() || (covered | suffix[start]) !== s.fullMask) return;
+      const kept = chosen.filter(id => s.old.has(id)).length;
+      const leastLoss = Math.max(0, s.old.size - kept - Math.min(s.required - chosen.length, suffixOld[start]));
+      if (cost + leastLoss + futureLower > bestCost) return;
+      if (chosen.length === s.required) {
+        if (covered === s.fullMask && [...chosen].sort().join('|') !== greedyKey) yield [...chosen];
+        return;
+      }
+      for (let i = start; i <= pool.length - (s.required - chosen.length); i++) {
+        if (proven || timedOut()) return;
+        chosen.push(pool[i]); yield* choose(i + 1, covered | s.masks.get(pool[i])); chosen.pop();
+      }
+    }
+    yield* choose(0, initialMask);
+  }
   function visit(index, cost) {
-    if (interrupted || cost + lower[index] > bestCost) return;
-    if (nodes >= maxNodes || performance.now() - begin >= maxMs) { interrupted = true; return; }
+    if (proven || interrupted || cost + lower[index] > bestCost) return;
+    if (nodes >= maxNodes || timedOut()) { interrupted = true; return; }
     nodes++;
     if (index === ordered.length) {
       const balance = Object.values(minutes).reduce((sum, n) => sum + n * n, 0);
       if (cost < bestCost || (cost === bestCost && balance < bestBalance)) { best = structuredClone(current); bestCost = cost; bestBalance = balance; }
+      // Matching both global lower bounds proves the objective is optimal.
+      if (bestCost === lower[0] && bestBalance === balanceLower) proven = true;
       return;
     }
     const s = ordered[index], duration = s.end - s.start;
-    for (const option of s.options) {
-      if (cost + option.cost + lower[index + 1] > bestCost) continue;
-      if (option.ids.some(id => minutes[id] + duration > personById.get(id).maxHours * 60 + 1e-8 || assignedShifts[id].some(other => overlap(s, other)))) continue;
-      current[s.id] = option.ids;
-      for (const id of option.ids) { minutes[id] += duration; assignedShifts[id].push(s); }
-      visit(index + 1, cost + option.cost);
-      for (const id of option.ids) { minutes[id] -= duration; assignedShifts[id].pop(); }
+    for (const ids of groups(s, cost, lower[index + 1])) {
+      const optionCost = [...s.old].filter(id => !ids.includes(id)).length;
+      if (cost + optionCost + lower[index + 1] > bestCost) continue;
+      current[s.id] = ids;
+      for (const id of ids) { minutes[id] += duration; assignedShifts[id].push(s); }
+      visit(index + 1, cost + optionCost);
+      for (const id of ids) { minutes[id] -= duration; assignedShifts[id].pop(); }
       delete current[s.id];
-      if (interrupted) return;
+      if (proven || interrupted) return;
     }
   }
   visit(0, 0);
-  if (!best) return { status: interrupted ? 'search_limit' : 'infeasible', optimal: !interrupted, schedule: null, diagnostics: [interrupted ? 'The search limit was reached before a valid schedule was found. This does not prove the request is impossible.' : assignments.length ? 'The requested assignments conflict with availability, overlapping shifts, skill requirements or hour limits. Try changing the requested placements.' : 'Availability, overlapping shifts, skill requirements and hour limits cannot all be satisfied together. Try restoring availability or increasing an hour limit.'], nodes, elapsedMs: Math.round(performance.now() - begin) };
-  const validation = checkSchedule(volunteers, shifts, best, { assignments });
-  if (!validation.valid) throw new Error('Internal validation rejected the proposed schedule. The original schedule was preserved.');
-  const differences = scheduleDifferences(shifts, baseline, best);
-  return { status: 'feasible', optimal: !interrupted, schedule: best, changedAssignments: bestCost, differences, workloads: validation.workloads, nodes, elapsedMs: Math.round(performance.now() - begin), diagnostics: [] };
+  return result();
 }

@@ -47,7 +47,7 @@ test('invalid photo/model/notes fail before any provider access', async t => {
   let calls = 0; t.mock.method(globalThis, 'fetch', async () => { calls++; throw new Error('Unexpected request'); });
   await assert.rejects(interpretEventSetup(config, '', '2026-10-25', { image: {} }));
   await assert.rejects(interpretEventSetup({ ...config, model: 'gemma-3-1b-it' }, '', '2026-10-25', { image: image() }), /image-capable/);
-  await assert.rejects(interpretEventSetup(config, 'x'.repeat(8001), '2026-10-25', { image: image() }), /8,000/);
+  await assert.rejects(interpretEventSetup(config, 'x'.repeat(32001), '2026-10-25', { image: image() }), /32,000/);
   assert.equal(calls, 0);
 });
 test('the model cannot label an imported assignment ready when it breaks a hard rule', async t => {
@@ -82,11 +82,11 @@ test('hosted photo parsing requires sign-in before Google and requires an actual
   const local = createApi({ GEMINI_API_KEY: config.key });
   assert.equal((await local(post('/api/setup/photo', { request: 'My event' }))).status, 400);
 });
-test('large request allowance is restricted to photo import and never writes during interpretation', async t => {
+test('photo import has a larger allowance than event JSON and never writes during interpretation', async t => {
   let modelCalls = 0;
   t.mock.method(globalThis, 'fetch', async (url) => { assert.match(String(url), /generativelanguage/); modelCalls++; return response(draft()); });
   const api = createApi({ GEMINI_API_KEY: config.key });
-  const bytes = Buffer.alloc(90000); Buffer.from(image().data, 'base64').copy(bytes);
+  const bytes = Buffer.alloc(900000); Buffer.from(image().data, 'base64').copy(bytes);
   const body = { image: { mimeType: 'image/png', data: bytes.toString('base64') } };
   assert.equal((await api(post('/api/setup/photo', body))).status, 200);
   assert.equal((await api(post('/api/setup/interpret', { ...body, request: 'Event' }))).status, 413);
