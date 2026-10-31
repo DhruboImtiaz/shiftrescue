@@ -4,6 +4,7 @@ import { initEventSetup } from '/event-setup.js';
 import { initVoiceInputs } from '/voice.js';
 import { recoverSavedEvent } from '/workspace.js';
 import { initProfile } from '/profile.js';
+import { initCollaboration } from '/collaboration.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -30,7 +31,9 @@ $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
 let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
 let editingShiftId = null, editingAssignmentsShiftId = null, editingEvent = false, gemmaIssue = null;
-let eventSetup, voiceInputs, profileUI;
+let eventSetup, voiceInputs, profileUI, collaborationUI;
+let syncing = false, eventChoiceSnapshot = '';
+const canEdit = () => !currentEvent || ['owner', 'editor'].includes(currentEvent.role);
 let deleteTarget = null;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
@@ -52,10 +55,11 @@ async function api(path, data, { signal } = {}) {
   const result = await response.json().catch(() => ({ error: response.status === 429 ? 'The site is receiving too many requests. Please wait before retrying.' : 'The server could not respond. Please retry.' }));
   if (!response.ok) {
     if (response.status === 401 && auth.user && !path.startsWith('/api/auth/')) {
-      auth.user = null; eventSetup?.clear(); profileUI?.reset(); renderCloud();
+      auth.user = null; eventSetup?.clear(); profileUI?.reset(); collaborationUI?.reset(); savedEvents = []; closeEventEditors(); clearWorkspace(); render(); renderPreview(); renderInterpretation();
       $('#auth-message').textContent = 'Your session ended. Sign in again to reopen your saved events. Nothing has been deleted.';
       if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
     }
+    if (response.status === 409 && currentEvent) showSharedUpdate('This event has changed. Load the latest version before saving your changes.');
     const error = new Error(result.error || 'Something went wrong. Please retry.'); error.status = response.status; error.quota = result.quota; throw error;
   }
   return result;
@@ -79,6 +83,8 @@ function setBusy(value, button = null) {
   renderGemmaStatus();
   voiceInputs?.refresh();
   profileUI?.disable(value);
+  renderPermissions();
+  collaborationUI?.render();
 }
 function renderConnection() {
   $('#connection-label').textContent = connection.verified ? 'Gemma connected' : connection.configured ? connection.managed ? 'Gemma configured' : 'Verify Gemma connection' : 'Connect Gemma';
@@ -92,13 +98,19 @@ function renderCloud() {
   $('#account-label').textContent = auth.user ? 'My account' : 'Sign in';
   $('#signed-in-panel').classList.toggle('hidden', !auth.user);
   $('#auth-form').classList.toggle('hidden', !!auth.user);
-  const choices = currentEvent && !savedEvents.some(e => e.id === currentEvent.id) ? [{ id: currentEvent.id, name: state.event, event_date: state.date }, ...savedEvents] : savedEvents;
-  $('#event-select').innerHTML = `<option value="" ${choices.length ? 'disabled' : ''}>Choose a saved event or create a new one</option>` + choices.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
+  const choices = currentEvent && !savedEvents.some(e => e.id === currentEvent.id) ? [{ id: currentEvent.id, name: state.event, event_date: state.date, role: currentEvent.role }, ...savedEvents] : savedEvents;
+  const options = list => list.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
+  const shared = choices.filter(e => ['shared', 'editor', 'viewer'].includes(e.role)), owned = choices.filter(e => !shared.includes(e));
+  const choiceSnapshot = JSON.stringify(choices.map(({ id, name, event_date, role }) => ({ id, name, event_date, role })));
+  if (choiceSnapshot !== eventChoiceSnapshot) {
+  eventChoiceSnapshot = choiceSnapshot;
+  $('#event-select').innerHTML = `<option value="" ${choices.length ? 'disabled' : ''}>Choose a saved event or create a new one</option>` + (owned.length ? `<optgroup label="Owned by you">${options(owned)}</optgroup>` : '') + (shared.length ? `<optgroup label="Shared with me">${options(shared)}</optgroup>` : '');
+  }
   $('#event-select').value = currentEvent?.id || '';
-  $('#cloud-status').textContent = currentEvent ? `Saved to Supabase · version ${currentEvent.version}` : auth.user ? 'Create an event to start your own roster' : 'Sign in to create and save your event';
+  $('#cloud-status').textContent = currentEvent ? `${currentEvent.role === 'owner' ? 'Owner' : currentEvent.role === 'editor' ? 'Edit access' : 'View access'} · Saved · version ${currentEvent.version}` : auth.user ? 'Create an event to start your own roster' : 'Sign in to create and save your event';
   $('#cloud-status').classList.toggle('saved', !!currentEvent);
   $('#reload-event').classList.toggle('hidden', !auth.user);
-  $('#edit-event').classList.toggle('hidden', !currentEvent);
+  $('#edit-event').classList.toggle('hidden', !currentEvent || !canEdit());
   $('#open-trash').classList.toggle('hidden', !auth.user);
   $('#event-date-label').textContent = new Date(`${state.date}T00:00:00+06:00`).toLocaleDateString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'long', year: 'numeric' });
   $('#event-name-label').textContent = `${state.event} · GMT+6`;
@@ -106,7 +118,8 @@ function renderCloud() {
 function adoptCloud(data) {
   validateData(data.state.volunteers, data.state.shifts, data.state.schedule, { allowEmpty: true });
 
-  currentEvent = { id: data.id, version: data.version };
+  currentEvent = { id: data.id, version: data.version, role: data.role || 'viewer' };
+  $('#shared-update').classList.add('hidden');
   state = data.state; preview = null; interpretation = null;
   persist(); render(); renderPreview(); renderInterpretation();
 }
@@ -176,9 +189,9 @@ function renderTeam() {
   $$('.edit-volunteer').forEach(button => button.addEventListener('click', () => openEditor(button.dataset.person)));
 }
 function renderHistory() {
-  $('#history-list').innerHTML = state.history.length ? state.history.map(entry => `<article class="history-entry"><span class="scenario-icon purple">${icon('shuffle')}</span><div class="history-copy"><h3>${escape(entry.title)}</h3><p>${escape(entry.text)}</p><div class="history-tag"><span class="badge ${entry.source === 'gemma' ? 'purple' : 'neutral'}">${entry.source === 'gemma' ? 'INTERPRETED BY GEMMA' : entry.source === 'team' ? 'TEAM SETTINGS' : 'SCRIPTED SCENARIO'}</span></div></div><small>${escape(new Date(entry.at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' }))} Dhaka</small></article>`).join('') : `<div class="empty-state">${icon('history')}<h3>A clear day so far.</h3><p>Applied repairs will appear here, with a record of what changed.</p></div>`;
+  $('#history-list').innerHTML = state.history.length ? state.history.map(entry => `<article class="history-entry"><span class="scenario-icon purple">${icon('shuffle')}</span><div class="history-copy"><h3>${escape(entry.title)}</h3><p>${escape(entry.text)}</p>${entry.actor ? `<small>By ${escape(entry.actor)}</small>` : ''}<div class="history-tag"><span class="badge ${entry.source === 'gemma' ? 'purple' : 'neutral'}">${entry.source === 'gemma' ? 'INTERPRETED BY GEMMA' : entry.source === 'team' ? 'TEAM SETTINGS' : entry.source === 'system' ? 'EVENT SHARING' : 'SCRIPTED SCENARIO'}</span></div></div><small>${escape(new Date(entry.at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit' }))} Dhaka</small></article>`).join('') : `<div class="empty-state">${icon('history')}<h3>A clear day so far.</h3><p>Applied repairs will appear here, with a record of what changed.</p></div>`;
 }
-function render() { renderMetrics(); renderBoard(); renderTeam(); renderShifts(); renderHistory(); renderCloud(); renderGemmaStatus(); }
+function render() { renderMetrics(); renderBoard(); renderTeam(); renderShifts(); renderHistory(); renderCloud(); renderGemmaStatus(); renderPermissions(); collaborationUI?.render(); }
 function showView(view) {
   for (const name of ['board', 'team', 'history']) $(`#${name}-view`).classList.toggle('hidden', name !== view);
   $$('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
@@ -201,7 +214,7 @@ function renderInterpretation() {
   $('#find-cover')?.addEventListener('click', () => runRepair(interpretation.changes, interpretation.source, interpretation.requestText || interpretation.message));
 }
 async function runRepair(changes, source, requestText, people = state.volunteers) {
-  if (busy) return;
+  if (busy || !canEdit()) return;
   clearNotice(); setBusy(true, $('#find-cover'));
   try {
     const result = await api('/api/repair', { volunteers: people, shifts: state.shifts, schedule: state.schedule, changes, eventId: currentEvent?.id, expectedVersion: currentEvent?.version, source, requestText });
@@ -226,7 +239,7 @@ function renderPreview() {
     const differences = preview.differences.map(d => `<div class="diff-row"><div><strong>${escape(d.station)}</strong><small>${clock(d.start)}–${clock(d.end)}</small></div><span class="removed-name">${d.removed.map(id => escape(person(id).name)).join(', ')}</span>${icon('arrow')}<span class="added-name">${d.added.map(id => escape(person(id, preview.volunteers).name)).join(', ')}</span></div>`).join('');
     el.innerHTML = `<div class="eyebrow muted">${incremental ? 'YOUR SHIFT CHANGES' : 'COMPLETE SCHEDULE PREVIEW'}</div><h2>${incremental ? 'Save this step. Keep building.' : 'Review the complete schedule.'}</h2><p>${incremental ? 'Only these changes will be saved. Other shifts can stay open.' : 'The full schedule takes effect only when you apply it.'}</p><div class="repair-summary"><span class="badge green">${icon('check')} ${incremental ? 'No assignment conflicts' : 'All rules satisfied'}</span><span class="badge ${fullCheck.valid ? 'green' : 'neutral'}">${fullCheck.valid ? 'All shifts covered' : 'Schedule in progress'}</span><span class="badge purple">${count} assignment${count === 1 ? '' : 's'} ${incremental ? 'updated' : 'replaced'}</span></div>${edits.length ? `<h3>Proposed changes</h3>${edits.map(c => `<div class="change-line">${escape(changeDescription(c, preview.volunteers))}</div>`).join('')}` : ''}${differences}${incremental && preview.warnings?.length ? `<div class="setup-review-notice"><strong>You can save now; these gaps can be filled later.</strong><ul>${preview.warnings.map(text => `<li>${escape(text)}</li>`).join('')}</ul></div>` : ''}<p class="fine-print">${incremental ? 'Adding, removing or moving one volunteer does not require a complete event schedule.' : `${preview.nodes.toLocaleString()} search states checked. ${preview.optimal ? 'Fewest changes verified; workload balance breaks ties.' : 'Valid solution; optimality is not proven.'}`}</p><div class="repair-actions"><button id="discard-preview" class="button subtle">Keep saved assignments</button><button id="apply-repair" class="button primary">${incremental ? 'Save changes' : 'Apply complete schedule'} ${icon('check')}</button></div>`;
     $('#apply-repair').addEventListener('click', async () => {
-      if (busy) return;
+      if (busy || !canEdit()) return;
       const check = checkSchedule(preview.volunteers, state.shifts, preview.schedule, { assignments: placements, allowPartial: incremental });
       if (!check.valid) { notify('Validation failed. Your saved assignments are unchanged.', true); return; }
       if (currentEvent) {
@@ -249,7 +262,7 @@ function renderPreview() {
   $('#discard-preview').addEventListener('click', () => { preview = null; renderPreview(); });
 }
 function openAssignmentEditor(id) {
-  if (busy) return;
+  if (busy || !canEdit()) return;
   editingAssignmentsShiftId = id;
   const shift = state.shifts.find(s => s.id === id);
   $('#assignment-title').textContent = `${shift.station} · ${clock(shift.start)}–${clock(shift.end)}`;
@@ -270,7 +283,7 @@ $('#assignment-form').addEventListener('submit', async event => {
   await runRepair(changes, 'team', `Updated assignments for ${shift.station}, ${clock(shift.start)}–${clock(shift.end)}.`);
 });
 function openEditor(id = null) {
-  if (busy) return;
+  if (busy || !canEdit()) return;
   if (!id && state.volunteers.length >= MAX_VOLUNTEERS) { notify(`Each event supports up to ${MAX_VOLUNTEERS} volunteers.`, true); return; }
   editingId = id; const p = id ? person(id) : { name: '', skills: ['welcome'], availability: [[600, 960]], maxHours: 4 };
   $('#edit-title').textContent = id ? `Edit ${p.name}` : 'Add volunteer'; $('#edit-name').value = p.name;
@@ -285,6 +298,7 @@ function draftState(next) {
   return next;
 }
 async function saveSetup(next) {
+  if (!canEdit()) throw new Error('You have view access. Ask the owner for edit access.');
   next = draftState(next); setBusy(true);
   try {
     if (currentEvent) { adoptCloud(await api(`/api/events/${currentEvent.id}/setup`, { state: { ...next, history: [] }, expectedVersion: currentEvent.version })); await refreshEventList(); }
@@ -298,7 +312,7 @@ function renderShifts() {
   $$('.edit-shift').forEach(b => b.addEventListener('click', () => openShift(b.dataset.shift)));
 }
 function openShift(id = null) {
-  if (busy) return;
+  if (busy || !canEdit()) return;
   if (!id && state.shifts.length >= MAX_SHIFTS) { notify(`Each event supports up to ${MAX_SHIFTS} shifts.`, true); return; }
   editingShiftId = id; const s = state.shifts.find(s => s.id === id) || { station: '', start: 600, end: 720, required: 2, skills: [] };
   $('#shift-title').textContent = id ? 'Edit shift' : 'Add shift'; $('#shift-station').value = s.station; $('#shift-start').value = clock(s.start); $('#shift-end').value = clock(s.end); $('#shift-required').value = s.required; $('#shift-skills').value = s.skills.join(', '); $('#shift-message').textContent = ''; $('#delete-shift').classList.toggle('hidden', !id); $('#shift-dialog').showModal();
@@ -308,7 +322,7 @@ function renderGemmaStatus() {
   const box = $('#gemma-status'); if (!box) return;
   box.classList.toggle('hidden', !gemmaIssue);
   const remaining = gemmaIssue?.retryAt ? Math.max(0, Date.parse(gemmaIssue.retryAt) - Date.now()) : 0;
-  $('#interpret-button').disabled = busy || remaining > 0 || !state?.volunteers.length || !state?.shifts.length;
+  $('#interpret-button').disabled = busy || !canEdit() || remaining > 0 || !state?.volunteers.length || !state?.shifts.length;
   if (!gemmaIssue) return;
   const retry = gemmaIssue.retryAt ? new Date(gemmaIssue.retryAt).toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + ' Dhaka (GMT+6)' : null;
   const mins = Math.ceil(remaining / 60000);
@@ -421,14 +435,14 @@ $('#auth-form').addEventListener('submit', async event => {
 $('#signout-button').addEventListener('click', async () => {
   if (busy) return; setBusy(true, $('#signout-button'));
   try {
-    await api('/api/auth/signout', {}); eventSetup.clear(); auth.user = null; profileUI.reset(); savedEvents = []; clearWorkspace();
+    await api('/api/auth/signout', {}); eventSetup.clear(); auth.user = null; profileUI.reset(); collaborationUI.reset(); savedEvents = []; clearWorkspace();
     $('#auth-dialog').close(); render(); renderInterpretation(); renderPreview(); showView('board'); notify('Signed out. Your cloud events remain private to your account.');
     location.assign('/');
   } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });
 $('#edit-event').addEventListener('click', () => { editingEvent = true; openEventDialog(); });
 $('#delete-event').addEventListener('click', () => {
-  if (busy || !currentEvent) return;
+  if (busy || currentEvent?.role !== 'owner') return;
   deleteTarget = { ...currentEvent, name: state.event };
   $('#event-dialog').close(); $('#delete-event-description').textContent = `“${deleteTarget.name}” will be removed from your active events.`;
   $('#delete-event-message').textContent = ''; $('#delete-event-dialog').showModal();
@@ -472,7 +486,7 @@ function openEventDialog() {
   $('#event-dialog h2').textContent = editingEvent ? 'Edit event & date.' : 'Make it your event.';
   $('#event-dialog .eyebrow').textContent = editingEvent ? 'EVENT SETTINGS' : 'A NEW EVENT';
   $('#event-use-gemma').classList.toggle('hidden', editingEvent);
-  $('#delete-event').classList.toggle('hidden', !editingEvent || !currentEvent);
+  $('#delete-event').classList.toggle('hidden', !editingEvent || currentEvent?.role !== 'owner');
   $('#event-name').value = editingEvent ? state.event : ''; $('#event-date-input').value = state.date; $('#event-message').textContent = ''; $('#event-copy').checked = false; $('#event-copy-label').classList.toggle('hidden', editingEvent || !(state.volunteers.length || state.shifts.length)); $('#event-description').textContent = editingEvent ? 'Update the event name or date. Shift times stay in Dhaka.' : 'Create an event for your own team, shifts and schedule.'; $('#create-event-button').textContent = editingEvent ? 'Save event settings' : 'Create saved event'; $('#event-dialog').showModal();
 }
 $('#new-event').addEventListener('click', () => {
@@ -517,6 +531,67 @@ voiceInputs = initVoiceInputs({
   requestSignIn() { $('#setup-dialog').close(); $('#auth-message').textContent = 'Sign in to use voice input.'; $('#auth-dialog').showModal(); },
   requestConnection() { $('#setup-dialog').close(); $('#connection-dialog').showModal(); }
 });
+
+function renderPermissions() {
+  const readOnly = !!currentEvent && !canEdit();
+  document.body.classList.toggle('view-only', readOnly);
+  $('#access-mode').classList.toggle('hidden', !readOnly);
+  document.querySelectorAll('#add-volunteer, #add-shift, .edit-volunteer, .edit-shift, .edit-assignments, #generate-schedule, #manage-setup, #apply-repair, #find-cover, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #save-assignment-edits, #request-input, #edit-form input, #edit-form textarea, #shift-form input, #assignment-form input').forEach(el => { el.disabled = busy || readOnly; });
+}
+function showSharedUpdate(message) {
+  $('#shared-update-message').textContent = message; $('#shared-update').classList.remove('hidden');
+}
+function closeEventEditors() {
+  for (const id of ['edit-dialog', 'shift-dialog', 'assignment-dialog', 'event-dialog', 'share-dialog']) if ($(`#${id}`).open) $(`#${id}`).close();
+}
+async function syncSharedEvent() {
+  if (!auth.user || busy || syncing || document.hidden || document.body.classList.contains('loading-workspace')) return;
+  syncing = true;
+  const id = currentEvent?.id;
+  try {
+    await refreshEventList();
+    if (busy || currentEvent?.id !== id) return;
+    await collaborationUI.refresh();
+    if (!id) return;
+    const status = await api(`/api/events/${id}/status`);
+    if (busy || currentEvent?.id !== id) return;
+    $('#share-pending-count').textContent = status.pendingRequests ? `(${status.pendingRequests})` : '';
+    $('#share-pending-count').classList.toggle('hidden', !status.pendingRequests);
+    if (status.role !== currentEvent.role) {
+      currentEvent.role = status.role;
+      if (!canEdit()) { closeEventEditors(); preview = null; interpretation = null; renderPreview(); renderInterpretation(); }
+      renderPermissions(); renderCloud(); collaborationUI.render();
+    }
+    if (status.version !== currentEvent.version) {
+      if (document.querySelector('dialog[open]') || preview || interpretation || $('#request-input').value.trim()) {
+        showSharedUpdate('This event has updates. Your unsaved work is kept until you load the latest version.');
+      } else {
+        const latest = await api(`/api/events/${id}`);
+        if (!busy && currentEvent?.id === id && !document.querySelector('dialog[open]') && !preview && !interpretation && !$('#request-input').value.trim()) adoptCloud(latest);
+      }
+    }
+  } catch (error) {
+    if (error.status === 404 && id && currentEvent?.id === id) {
+      closeEventEditors(); clearWorkspace(); persist(); render(); renderPreview(); renderInterpretation();
+      await refreshEventList(); notify('This shared event is no longer available. Its owner may have removed your access or moved it to Trash.', true);
+    } else if (error.status !== 401 && id && currentEvent?.id === id) showSharedUpdate('Shared updates could not be checked. Your saved event is unchanged. Use Refresh to try again.');
+  } finally { syncing = false; }
+}
+$('#load-shared-update').addEventListener('click', async () => {
+  if (busy || !currentEvent) return;
+  if (document.querySelector('dialog[open]') && !confirm('Load the latest event and discard unsaved form changes?')) return;
+  setBusy(true);
+  try { const id = currentEvent.id; const saved = await api(`/api/events/${id}`); closeEventEditors(); adoptCloud(saved); notify('Loaded the latest shared event. Review any changes again before saving.'); }
+  catch (error) { notify(error.message, true); } finally { setBusy(false); }
+});
+collaborationUI = initCollaboration({
+  api, context: () => ({ auth, currentEvent, busy }), setBusy, notify,
+  async onChanged(id) { if (id && currentEvent?.id === id) adoptCloud(await api(`/api/events/${id}`)); await refreshEventList(); },
+  async onOpen(id) { if (busy) return; setBusy(true); try { adoptCloud(await api(`/api/events/${id}`)); await refreshEventList(); showView('board'); } finally { setBusy(false); } }
+});
+setInterval(syncSharedEvent, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSharedEvent(); });
+
 async function init() {
   if (busy) return;
   state ||= emptyWorkspace(); workspaceStatus('loading'); setBusy(true);

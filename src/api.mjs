@@ -29,6 +29,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
   const cloud = cloudService({ url: env.SUPABASE_URL, key: env.SUPABASE_PUBLISHABLE_KEY, secure: env.COOKIE_SECURE === 'true' || !!env.NETLIFY });
   const tokens = proposalTokens(env.PROPOSAL_SECRET);
   const hosted = !!env.NETLIFY;
+  const requireEdit = stored => { if (stored && !['owner', 'editor'].includes(stored.role)) throw new AppError('You have view access. Ask the owner for edit access to change this event.', 403); };
   return async function handle(request) {
     const headers = new Headers({ ...securityHeaders, 'Content-Type': 'application/json; charset=utf-8' });
     const res = { setHeader(key, value) { headers.delete(key); for (const part of Array.isArray(value) ? value : [value]) headers.append(key, part); } };
@@ -51,6 +52,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
           const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;
           validateVoiceInput(input);
           const stored = input.eventId ? await cloud.load(active, input.eventId) : null;
+          requireEdit(stored);
           const vocabulary = stored ? [...stored.state.volunteers.flatMap(p => [p.name, p.id]), ...stored.state.shifts.flatMap(s => [s.station, s.id])] : [];
           return send(200, await transcribeVoice(config, input, vocabulary));
         }
@@ -58,6 +60,9 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (pathname === '/api/auth/signout') { await cloud.logout(req, res); return send(200, { signedOut: true }); }
         if (pathname === '/api/profile') return send(200, { profile: await cloud.saveProfile(await cloud.session(req, res, true), input) });
         if (pathname === '/api/profile/email') return send(200, await cloud.changeEmail(await cloud.session(req, res, true), input, res));
+        if (pathname === '/api/access/request') return send(200, await cloud.requestAccess(await cloud.session(req, res, true), input));
+        const sharingAction = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/sharing$/i);
+        if (sharingAction) return send(200, await cloud.sharing(await cloud.session(req, res, true), sharingAction[1], input));
         if (pathname === '/api/events') {
           const active = await cloud.session(req, res, true);
           const initial = input.state || { volunteers: [], shifts: [], schedule: {} };
@@ -72,12 +77,13 @@ export function createApi(env = process.env, { saveConnection } = {}) {
             return send(200, action[2] === 'restore' ? await cloud.load(active, id) : result);
           }
           if (action[2] === 'apply') {
+            requireEdit(await cloud.load(active, id));
             const proof = tokens.read(input.proposalId, active.user.id, id);
             const check = checkSchedule(proof.state.volunteers, proof.state.shifts, proof.state.schedule, { assignments: proof.assignments || [], allowPartial: proof.mode === 'incremental' });
             if (!check.valid) throw new AppError('The preview failed final validation.', 409);
             return send(200, await cloud.save(active, id, proof.version, proof.state, proof.activity));
           }
-          await cloud.load(active, id);
+          requireEdit(await cloud.load(active, id));
           const state = normalizeSetup(input.state);
           return send(200, await cloud.save(active, id, input.expectedVersion, state, { kind: 'setup', title: 'Event setup updated', text: 'Volunteer, shift or event settings changed. Unaffected assignments were kept; any invalid placements became open places.', source: 'team', differences: [] }));
         }
@@ -111,6 +117,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (pathname === '/api/interpret') {
           const active = cloud.configured || hosted ? await cloud.session(req, res, true) : null;
           const stored = input.eventId ? await cloud.load(active, input.eventId) : null;
+          requireEdit(stored);
           const people = stored?.state.volunteers || input.volunteers, shifts = stored?.state.shifts || input.shifts;
           const schedule = stored?.state.schedule || input.schedule || Object.fromEntries(shifts.map(s => [s.id, []]));
           validateData(people, shifts, schedule);
@@ -120,6 +127,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (pathname === '/api/repair') {
           const active = input.eventId ? await cloud.session(req, res, true) : null;
           const stored = input.eventId ? await cloud.load(active, input.eventId) : null;
+          requireEdit(stored);
           if (stored && stored.version !== input.expectedVersion) throw new AppError('This event changed in another tab. Refresh the cloud copy before finding cover.', 409);
           const people = input.volunteers || stored?.state.volunteers, shifts = stored?.state.shifts || input.shifts, baseline = stored?.state.schedule || input.schedule;
           validateData(people, shifts, baseline);
@@ -140,6 +148,19 @@ export function createApi(env = process.env, { saveConnection } = {}) {
       if (pathname === '/api/status') return send(200, { configured: !!config.key && config.key !== 'your_google_ai_studio_key_here', verified, model: config.model, managed: hosted || cloud.configured });
       if (pathname === '/api/auth/session') return send(200, { configured: cloud.configured, user: safeUser((await cloud.session(req, res))?.user) });
       if (pathname === '/api/profile') return send(200, { profile: await cloud.profile(await cloud.session(req, res, true)) });
+      if (pathname === '/api/access/requests') return send(200, { requests: await cloud.myRequests(await cloud.session(req, res, true)) });
+      const sharing = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/(sharing|status)$/i);
+      if (sharing) {
+        const active = await cloud.session(req, res, true);
+        return send(200, sharing[2] === 'sharing' ? await cloud.sharing(active, sharing[1]) : await cloud.eventStatus(active, sharing[1]));
+      }
+      const requesterPhoto = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/people\/([0-9a-f-]{36})\/avatar$/i);
+      if (requesterPhoto) {
+        const photo = await cloud.requesterAvatar(await cloud.session(req, res, true), requesterPhoto[1], requesterPhoto[2]);
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(photo.type)) throw new AppError('This profile photo is unavailable.', 404);
+        headers.set('Content-Type', photo.type); headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+        return new Response(await photo.arrayBuffer(), { status: 200, headers });
+      }
       if (pathname === '/api/profile/avatar') {
         const image = await cloud.avatar(await cloud.session(req, res, true));
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(image.type)) throw new AppError('This profile photo is unavailable.', 404);

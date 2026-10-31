@@ -36,7 +36,7 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
   function fail(error) {
     if (!error) return;
     const conflict = error.code === 'PT409';
-    throw new AppError(conflict ? 'A newer event version is already saved. Refresh the saved copy before trying again.' : error.message || 'Supabase could not complete the request.', conflict ? 409 : error.code === 'PT404' ? 404 : 400);
+    throw new AppError(conflict ? 'A newer event version is already saved. Refresh the saved copy before trying again.' : error.message || 'Supabase could not complete the request.', conflict ? 409 : error.code === 'PT404' ? 404 : error.code === '42501' ? 403 : 400);
   }
   const sessionUnavailable = () => new AppError('Could not verify your session right now. Please retry; your saved events are unchanged.', 503);
   const temporaryAuthError = error => error && ![400, 401, 403, 422].includes(error.status);
@@ -149,10 +149,10 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
   async function list(active, { deleted = false } = {}) {
     const events = [];
     for (let offset = 0; ; offset += 200) {
-      let query = active.db.from('shiftrescue_events').select('id,name,event_date,timezone,version,updated_at,deleted_at');
+      let query = active.db.from('shiftrescue_events').select('id,owner_id,name,event_date,timezone,version,updated_at,deleted_at');
       query = deleted ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null);
       const { data, error } = await query.order('updated_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + 199);
-      fail(error); events.push(...data);
+      fail(error); events.push(...data.map(e => ({ ...e, role: e.owner_id === active.user?.id ? 'owner' : 'shared' })));
       if (data.length < 200) return events;
     }
   }
@@ -173,5 +173,28 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     const { data, error } = await active.db.rpc('shiftrescue_set_event_deleted', { p_event_id: id, p_expected_version: version, p_deleted: deleted });
     fail(error); return data;
   }
-  return { configured, session, login, logout, profile, saveProfile, avatar, changeEmail, list, load, save, setDeleted };
+  async function collaboration(active, operation, params = {}) {
+    const { data, error } = await active.db.rpc(`shiftrescue_${operation}`, params);
+    fail(error);
+    if (data?.error) throw new AppError(data.error, [400, 403, 404, 409, 429].includes(data.status) ? data.status : 400);
+    return data;
+  }
+  async function requestAccess(active, input) {
+    if (typeof input.code !== 'string' || input.code.length > 40 || !/^[A-Fa-f0-9\s-]{12,40}$/.test(input.code) || input.code.replace(/[\s-]/g, '').length !== 12 || !['viewer', 'editor'].includes(input.role)) throw new AppError('Enter a valid event code and choose view or edit access.');
+    return collaboration(active, 'request_access', { p_code: input.code, p_role: input.role });
+  }
+  async function sharing(active, id, input) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new AppError('Invalid event ID.');
+    if (!input) return collaboration(active, 'event_sharing', { p_event_id: id });
+    if (input.action === 'rotate') return collaboration(active, 'rotate_event_code', { p_event_id: id });
+    if (typeof input.userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.userId) || !['viewer', 'editor', 'reject', 'remove'].includes(input.decision)) throw new AppError('Choose a person and a valid access decision.');
+    return collaboration(active, 'decide_access', { p_event_id: id, p_user_id: input.userId, p_decision: input.decision });
+  }
+  async function requesterAvatar(active, id, userId) {
+    const row = await collaboration(active, 'requester_avatar', { p_event_id: id, p_user_id: userId });
+    if (!row?.avatarPath) throw new AppError('No profile photo has been added.', 404);
+    const { data, error } = await active.db.storage.from(AVATAR_BUCKET).download(row.avatarPath);
+    fail(error); return data;
+  }
+  return { configured, session, login, logout, profile, saveProfile, avatar, changeEmail, list, load, save, setDeleted, requestAccess, sharing, requesterAvatar, eventStatus: async (active, id) => { const result = await collaboration(active, 'event_status', { p_event_id: id }); if (!result) throw new AppError('This event is no longer available to your account.', 404); return result; }, myRequests: active => collaboration(active, 'my_requests') };
 }

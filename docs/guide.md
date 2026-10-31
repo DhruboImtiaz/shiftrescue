@@ -43,7 +43,7 @@ Accounts start with an empty workspace. Create your own events, volunteers and s
 - Allow microphone access, speak for up to 30 seconds, then choose **Stop & transcribe**. **Cancel recording** discards the recording without changing your text.
 - The transcript is appended to the editable text box. Check names and times before sending it to Gemma; voice input never interprets, assigns or saves automatically.
 - Google’s `gemini-3.5-transcribe` handles speech recognition with the existing private `GEMINI_API_KEY`; the configured Gemma model still interprets event and schedule requests. Model access and quota for transcription must be available on that Google connection.
-- Audio is sent to Google only after stopping a recording. ShiftRescue does not store audio, and requests use `store: false` in the transcription API. The selected event’s existing names and shift labels provide vocabulary hints after ownership is checked.
+- Audio is sent to Google only after stopping a recording. ShiftRescue does not store audio, and requests use `store: false` in the transcription API. The selected event’s existing names and shift labels provide vocabulary hints after edit access is checked.
 - Recording requires microphone permission and a browser with `getUserMedia` and `MediaRecorder` over HTTPS (or localhost). Unsupported browsers and transcription failures keep typed input available. Audio is limited to 1 MiB. The photo route has its own image limit; event/setup/proposal JSON routes accept up to 1 MiB and unrelated routes retain the 80 KB limit.
 
 Language support: [Google transcription model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe). Exact recognition depends on pronunciation, background noise and names; the transcript is always editable.
@@ -253,12 +253,12 @@ Netlify’s request limit and Google’s model quota are separate. For quota tim
 
 Before deploying this version, apply `supabase/migrations/20261025010836_event_trash_and_restore.sql` to the existing database. It adds `deleted_at` and owner/version-checked delete/restore functions, and prevents loading or saving deleted events through the active-event functions. It removes no event data. New installations use the updated `supabase/schema.sql`.
 
-The lifecycle functions use `SECURITY INVOKER`, existing owner RLS and the signed-in user's token. Delete and restore increment the event version so an older tab cannot apply a preview created before either operation.
+The lifecycle functions use `SECURITY INVOKER`, owner-only lifecycle checks and the signed-in user's token. Delete and restore increment the event version so an older tab cannot apply a preview created before either operation.
 
 ## Data Storage
 
 - **Local workspace:** An unsaved local draft can be kept in browser storage. Signing in reopens the selected or latest saved event; all active saved events remain available in the event selector. Sample rosters are not injected into accounts, and browser drafts are not automatically copied into a signed-in account.
-- **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with row-level ownership policies. Queries run with the verified user’s identity; database functions use `SECURITY INVOKER`.
+- **Cloud workspace:** Events, volunteers, shifts, assignments and activity use five Supabase tables with role-based row-level policies for event owners, editors and viewers. Queries run with the verified user’s identity. Event load/save functions use `SECURITY INVOKER`; narrowly scoped sharing helpers live in a private schema and check the caller before every cross-user operation.
 - **Sessions:** Auth tokens use HttpOnly, SameSite cookies, with Secure cookies on Netlify. Temporary provider/network failures preserve these cookies and return a retryable error; confirmed invalid sessions still require sign-in. Passwords and session tokens are not stored in browser local storage.
 - **Saved assignments:** Cloud saves are transactional and version-checked. Partial schedules can be saved; staffing and skill gaps remain visible until filled. Unconfirmed or failed edits preserve the saved event. Team/shift edits keep unaffected placements and reopen only assignments that no longer fit. Full schedule generation remains a separate action.
 - **AI requests:** Volunteer names, skills, availability and the coordinator’s message are sent to Google only when using Gemma. Selected photos are sent only when creating a photo draft; recordings are sent only after stopping transcription. Original images and audio are not stored in the event database. Event descriptions are kept in the current browser session for retry and cleared after creation. Raw descriptions are not added to the cloud activity log. Avoid unnecessary sensitive personal details.
@@ -269,12 +269,12 @@ The lifecycle functions use `SECURITY INVOKER`, existing owner RLS and the signe
 ## Roadmap / Known Limitations
 
 - Each event supports **80 volunteers, 24 shifts and 1–8 people per shift** on one day in **Asia/Dhaka**.
-- Event setup accepts descriptions up to **32,000 characters**. Existing-event change requests accept **3,000 characters** and **24 operations**: adding/removing shift assignments, unavailability and maximum-hour changes. Moves and replacements use a removal plus an addition.
+- Event setup accepts descriptions up to **32,000 characters**. Existing-event change requests accept **3,000 characters** and **384 operations**: adding/removing shift assignments, unavailability and maximum-hour changes. Moves and replacements use a removal plus an addition.
 - Setup supports one day in Dhaka, exact shift intervals, staffing, collective skill coverage and explicit initial assignments from text or a roster photo. Review those assignments before creating the event; later edits use **Edit assignments** or **What changed?** Required breaks, travel time, permanent assignment locks, recurring events and other additional rules require clarification or manual restructuring; they are not enforced by the scheduler.
 - Use exact names and 24-hour times. Ambiguous times, unknown people and unsupported dates require clarification.
 - Repair previews expire after ten minutes. Refresh and regenerate previews after a stale-version conflict.
 - The search has a time/node budget; a valid best-so-far solution may not be proved optimal.
-- [ ] Shared coordinator workspaces and invitations.
+- [x] Shared events, join codes, access requests and owner-managed viewer/editor roles.
 - [ ] Volunteer availability collection and confirmed swaps.
 - [ ] Calendar integration, recurring events and overnight shifts.
 - [ ] SMS/email notifications.
@@ -293,7 +293,7 @@ Apply `supabase/migrations/20261031083058_editable_profiles.sql` once to an exis
 
 Email stays in Supabase Auth. The separate **Change email** form uses the authenticated session and follows the project's email confirmation settings; a pending change does not prematurely replace the displayed current email. Configure the Supabase Auth Site URL and email templates for the app's deployed domain as for signup confirmations.
 
-Profiles and contact information are private to their owners. The private `shiftrescue-avatars` bucket permits only owner-folder reads, inserts and deletes, with a 2 MiB limit and JPG/PNG/WebP types. The browser prepares a center-cropped square image up to 512×512; the app displays it in a circle. Photos are uploaded only on **Save changes**, through the same-origin API using the verified user's token. The profile stores the object path; authenticated photo responses use `/api/profile/avatar` with no caching. Replacements use unique paths, and previous photos are removed only after a successful profile update. Cleanup failures can leave an unused private object but do not undo a saved profile. No privileged Supabase key or new environment variables are required.
+Email and phone remain private to their owners. Event owners can preview the name, username, bio and current photo of pending requesters and approved members; other profile fields remain inaccessible. The private `shiftrescue-avatars` bucket permits self-folder reads, inserts and deletes; an event owner can also read the current photo of a pending requester or approved member, with a 2 MiB limit and JPG/PNG/WebP types. The browser prepares a center-cropped square image up to 512×512; the app displays it in a circle. Photos are uploaded only on **Save changes**, through the same-origin API using the verified user's token. The profile stores the object path; authenticated photo responses use `/api/profile/avatar` with no caching. Replacements use unique paths, and previous photos are removed only after a successful profile update. Cleanup failures can leave an unused private object but do not undo a saved profile. No privileged Supabase key or new environment variables are required.
 
 Profile verification: `node --test test/profile.test.mjs` checks signup validation, existing-account sign-in, owner-bound writes, photo replacement/removal, upload cleanup on username conflicts, authentication/CSRF boundaries and email confirmation behavior. Run `npm test`, `npm run check` and `npm run build` before release. In a browser, verify signup fields, profile edits surviving reload, optional bio/photo removal, Cancel behavior and duplicate usernames; use two isolated test accounts to confirm direct database/Storage access cannot cross ownership boundaries.
 
@@ -311,3 +311,15 @@ Use `?concept=product`, `?concept=people`, or `?concept=mission` for direct link
 ## Larger event capacity
 
 Events support 80 volunteers, 24 shifts and 1–8 people per shift. Browser forms, validators, AI prompts, request/proposal sizes and database constraints share these limits. Apply the `larger_event_capacity` migration for existing databases. Scheduling generates groups lazily with a 1.5-second/600,000-node budget, preserves rule validation, and reports a search limit rather than claiming an unproven conflict. A valid bounded-search result may not be globally optimal. Text setup allows 32,000 characters; AI output remains subject to the provider deadline and quota, and larger imports may need shorter input or manual completion.
+
+## Shared event coordination
+
+Use **Share event** on an owned event to copy its unique 12-character code. Signed-in users choose **Join event**, enter that code and request View or Edit access. The owner sees pending profiles and can grant either role or reject the request. Viewers can read/export; editors can edit event settings, the team, shifts and assignments. Only the owner manages sharing and Trash. Shared events appear in the event selector's **Shared with me** group. Existing events receive codes during migration.
+
+Apply the `event_collaboration` migration before deploying this feature. Membership, request and rate-limit tables are in `shiftrescue_private`, with direct client table access revoked and RLS enabled. Exposed RPC wrappers run as the caller; private helpers validate the authenticated subject and ownership. They never trust editable user metadata for permissions. Profiles and avatars expose only the limited preview the owner needs; phone and email remain private. Rejected/revoked users' photos stop being available to the event owner unless another active relationship permits them.
+
+The page checks event status every five seconds while visible. Idle views load changes automatically. Open forms, request text and previews keep their local contents until **Load latest**; stale writes return a conflict. Role changes invalidate old previews via event versions, and every apply rechecks edit access. A revoked or trashed event closes on the next successful status check. Cached information already viewed cannot be recalled. Activity records the actual saving coordinator, independent of submitted audit labels.
+
+Owners can reset the code without removing existing members or pending requests. Invalid guesses are counted in the database (20 attempts per minute per account); rejected/revoked users wait one minute to reapply. Up to 500 requests may be pending per event. Access approvals are manual; email and push notifications are future work.
+
+`npm test` runs actual PostgreSQL role-policy tests locally using PGlite, for both a fresh schema and an upgraded database. Tests cover pending-access isolation, requester profile privacy, viewer write denial, owner-only sharing/lifecycle operations, code rotation, rejection, upgrade, demotion, revocation, actor attribution and stale saves.
