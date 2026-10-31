@@ -17,7 +17,7 @@ for (const installation of ['new', 'existing']) test(`real Postgres collaboratio
       const event = (await db.query("insert into public.shiftrescue_events(owner_id,name,event_date) values($1,'Existing saved event','2026-10-01') returning id", [user.id])).rows[0];
       await db.query("insert into public.shiftrescue_volunteers(event_id,id,name,skills,availability,max_hours,position) values($1,'existing-person','Existing volunteer','{}','[[600,720]]',2,0)", [event.id]);
       preserved = { userId: user.id, eventId: event.id };
-      await db.exec(await readFile(new URL('../supabase/migrations/20261031150622_event_collaboration.sql', import.meta.url), 'utf8'));
+      await db.exec(await readFile(new URL('../supabase/migrations/20261031235621_event_collaboration.sql', import.meta.url), 'utf8'));
       const result = await db.transaction(async tx => {
         await tx.exec('set local role authenticated;');
         await tx.query("select set_config('request.jwt.claim.sub',$1,true),set_config('request.jwt.claims',$2,true)", [user.id, JSON.stringify({ sub: user.id, is_anonymous: false })]);
