@@ -19,6 +19,7 @@
 
 /* Shared event coordination */
 .together-section{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;padding-top:12px;padding-bottom:96px}
+@media(min-width:901px){.together-section>.sharing-showcase{grid-column:1;grid-row:1}.together-section>.together-copy{grid-column:2;grid-row:1}}
 .together-copy>.eyebrow{color:var(--accent);margin-bottom:20px}
 .together-copy>h2{font-size:43px;line-height:1.15;letter-spacing:-1.8px;font-weight:550}
 .together-copy>p:not(.eyebrow):not(.together-note){font-size:14px;line-height:1.9;color:var(--muted);margin:22px 0;max-width:430px}
