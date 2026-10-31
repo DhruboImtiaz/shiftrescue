@@ -91,7 +91,6 @@ export function initEventSetup({ api, context, setBusy, onCreated, onGemmaSucces
     renderAssignments(draft);
     validateReview();
   }
-  $('#describe-event').addEventListener('click', open);
   $('#event-use-gemma').addEventListener('click', () => { $('#event-dialog').close(); open(); });
   $('#setup-close').addEventListener('click', () => { if (!context().busy) $('#setup-dialog').close(); });
   $('#setup-dialog').addEventListener('cancel', event => { if (context().busy) event.preventDefault(); });

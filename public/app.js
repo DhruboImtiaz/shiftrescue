@@ -72,7 +72,7 @@ function person(id, list = state.volunteers) { return list.find(p => p.id === id
 function avatar(p) { const color = /^#[a-f\d]{6}$/i.test(p.color || '') ? p.color : '#7584b8'; return `<span class="avatar" style="background:${color}">${escape(p.name.charAt(0).toUpperCase())}</span>`; }
 function setBusy(value, button = null) {
   busy = value;
-  $$('#interpret-button, .edit-volunteer, .edit-assignments, #save-assignment-edits, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #describe-event, #event-use-gemma, #setup-close, #open-trash, #delete-event, #confirm-delete-event, .restore-event, #connection-button').forEach(b => { b.disabled = value; });
+  $$('#interpret-button, .edit-volunteer, .edit-assignments, #save-assignment-edits, #apply-repair, #find-cover, #save-connection, #export-button, #auth-submit, #signout-button, #new-event, #reload-event, #event-select, #create-event-button, #account-button, #generate-schedule, #add-volunteer, #add-shift, #save-volunteer, #save-shift, #delete-volunteer, #delete-shift, #edit-event, .edit-shift, #manage-setup, #event-use-gemma, #setup-close, #open-trash, #delete-event, #confirm-delete-event, .restore-event, #connection-button').forEach(b => { b.disabled = value; });
   $$('.button.busy').forEach(b => b.classList.remove('busy'));
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
