@@ -137,7 +137,7 @@ The API is named the Gemini API, but the app selects a **Gemma** model explicitl
 npm start
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The empty local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) for the Product-first home page, then sign in or create an account to enter your workspace. For local development without cloud configuration, open [the local workspace](http://127.0.0.1:5173/workspace.html) to use the empty workspace and manual solver. Sign in to save private events and, when cloud mode is enabled, use Gemma.
 
 ### Tests & Production Build
 
@@ -284,3 +284,25 @@ The lifecycle functions use `SECURITY INVOKER`, existing owner RLS and the signe
 ## License
 
 MIT — see [LICENSE](LICENSE). No model weights are distributed with the project.
+
+### Editable account profiles and photos
+
+Create account collects a name, unique username, phone number, email and password. **My account → Edit profile** lets signed-in coordinators update their name, username and phone, optionally add a 160-character bio, and choose, replace or remove a circular profile photo. Cancel discards unsaved edits and selected photos. Existing accounts can sign in as before and complete their initially empty profiles.
+
+Apply `supabase/migrations/20261031083058_editable_profiles.sql` once to an existing installation before deploying this code. New installations use `supabase/schema.sql`, which includes the same profile setup. The migration creates profiles for existing accounts and an Auth signup trigger for new accounts, including those awaiting email confirmation. Usernames are stored lowercase and must be unique; valid usernames use 3–30 letters, numbers, periods or underscores and start with a letter or number. Phone numbers store 7–15 digits with an optional leading `+`. These numbers are contact details, not phone-verified login identities.
+
+Email stays in Supabase Auth. The separate **Change email** form uses the authenticated session and follows the project's email confirmation settings; a pending change does not prematurely replace the displayed current email. Configure the Supabase Auth Site URL and email templates for the app's deployed domain as for signup confirmations.
+
+Profiles and contact information are private to their owners. The private `shiftrescue-avatars` bucket permits only owner-folder reads, inserts and deletes, with a 2 MiB limit and JPG/PNG/WebP types. The browser prepares a center-cropped square image up to 512×512; the app displays it in a circle. Photos are uploaded only on **Save changes**, through the same-origin API using the verified user's token. The profile stores the object path; authenticated photo responses use `/api/profile/avatar` with no caching. Replacements use unique paths, and previous photos are removed only after a successful profile update. Cleanup failures can leave an unused private object but do not undo a saved profile. No privileged Supabase key or new environment variables are required.
+
+Profile verification: `node --test test/profile.test.mjs` checks signup validation, existing-account sign-in, owner-bound writes, photo replacement/removal, upload cleanup on username conflicts, authentication/CSRF boundaries and email confirmation behavior. Run `npm test`, `npm run check` and `npm run build` before release. In a browser, verify signup fields, profile edits surviving reload, optional bio/photo removal, Cancel behavior and duplicate usernames; use two isolated test accounts to confirm direct database/Storage access cannot cross ownership boundaries.
+
+### Home page and design drafts
+
+Open `/landing-drafts.html` to compare **Product-first**, **People-first**, and **Mission control**. Each has its own visual direction, feature/use-case story, top-right sign-in control, and account-creation entry points. The Product-first and Mission control pages include local, clearly labeled interactive scheduling examples; these never call the scheduling API or change an event.
+
+The selected **Product-first** design is the home page at `/`. Its copy makes AI-assisted planning explicit: AI interprets text, roster photos and voice notes into editable details and scheduling requests, the scheduling engine checks the plan, and the user approves changes. The former application page is preserved at `/workspace.html`.
+
+The home page and comparison drafts share `/landing.css`, `/landing.js` and an account dialog using the existing `/api/auth/signin` and `/api/auth/signup` endpoints. Sign-in or an immediately confirmed signup continues to `/workspace.html`; signup requiring email confirmation keeps the marketing page open and asks the user to confirm and then sign in. Signed-in visitors can choose **Open workspace**. In cloud mode, a signed-out direct workspace visit returns to `/?auth=signin`; signing out returns home. Temporary session-check failures retain the workspace retry state. No account session is stored in browser storage and no new database setup is needed.
+
+Use `?concept=product`, `?concept=people`, or `?concept=mission` for direct links. The drafts are marked `noindex,nofollow`. The People-first image is illustrative AI-generated marketing imagery; asset provenance and the generation prompt are recorded in `public/landing-assets/README.md`.

@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 import { checkSchedule, validateData } from './scheduler.mjs';
+import { AVATAR_BUCKET, serializeProfile, validateProfile } from './profile.mjs';
+import { validatePhoto } from './photo.mjs';
 
 export class AppError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -69,7 +72,12 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
   async function login(input, res, signup = false) {
     if (typeof input.email !== 'string' || input.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) || typeof input.password !== 'string' || input.password.length < 8 || input.password.length > 200) throw new AppError('Enter a valid email address and a password of at least 8 characters.');
     const credentials = { email: input.email.trim(), password: input.password };
+    if (signup) {
+      const { name, username, phone } = validateProfile(input);
+      credentials.options = { data: { name, username, phone } };
+    }
     const { data, error } = signup ? await client().auth.signUp(credentials) : await client().auth.signInWithPassword(credentials);
+    if (signup && error?.code === 'unexpected_failure') throw new AppError('Could not create this account. Try a different username, or sign in if you already have an account.');
     fail(error);
     if (data.session) res.setHeader('Set-Cookie', sessionCookies(data.session, secure));
     return { user: data.session ? safeUser(data.user) : null, confirmationRequired: !data.session, message: data.session ? 'Signed in. Your saved events are ready.' : 'Check your email to confirm your account, then return here and sign in. If you already have an account, use Sign in.' };
@@ -84,6 +92,57 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
       }
     } catch { /* Explicit local sign-out must work even during an Auth outage. */ }
     finally { res.setHeader('Set-Cookie', sessionCookies(null, secure)); }
+  }
+  async function profileRow(active) {
+    const { data, error } = await active.db.from('shiftrescue_profiles').select('name,username,phone,bio,avatar_path,updated_at').eq('id', active.user.id).single();
+    fail(error); return data;
+  }
+  async function profile(active) { return serializeProfile(await profileRow(active), active.user.email || ''); }
+  async function saveProfile(active, input) {
+    const fields = validateProfile(input), previous = await profileRow(active);
+    const bucket = active.db.storage.from(AVATAR_BUCKET);
+    let uploaded = null;
+    if (Object.hasOwn(input, 'image')) {
+      if (input.image === null) fields.avatar_path = null;
+      else {
+        if (!input.image) throw new AppError('Choose a profile photo or use Remove photo.');
+        const image = validatePhoto(input.image);
+        const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[image.mimeType];
+        uploaded = `${active.user.id}/${randomUUID()}.${extension}`;
+        const { error } = await bucket.upload(uploaded, Buffer.from(image.data, 'base64'), { contentType: image.mimeType, upsert: false });
+        fail(error); fields.avatar_path = uploaded;
+      }
+    }
+    let saved, rejected = false;
+    try {
+      const { data, error } = await active.db.from('shiftrescue_profiles').update(fields).eq('id', active.user.id).select('name,username,phone,bio,avatar_path,updated_at').single();
+      rejected = ['23505', '23514', '42501'].includes(error?.code);
+      if (error?.code === '23505') throw new AppError('That username is already taken. Choose another one.', 409);
+      fail(error); saved = data;
+    } catch (error) {
+      // A lost response can follow a successful write. Only clean up uploads
+      // when the database explicitly confirms it rejected the update.
+      if (uploaded && rejected) await bucket.remove([uploaded]).catch(() => {});
+      throw error;
+    }
+    // Delete the old photo only after the profile points to its replacement.
+    if (Object.hasOwn(fields, 'avatar_path') && previous.avatar_path && previous.avatar_path !== fields.avatar_path) await bucket.remove([previous.avatar_path]).catch(() => {});
+    return serializeProfile(saved, active.user.email || '');
+  }
+  async function avatar(active) {
+    const row = await profileRow(active);
+    if (!row.avatar_path) throw new AppError('No profile photo has been added.', 404);
+    const { data, error } = await active.db.storage.from(AVATAR_BUCKET).download(row.avatar_path);
+    fail(error); return data;
+  }
+  async function changeEmail(active, input, res) {
+    if (typeof input.email !== 'string' || input.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) throw new AppError('Enter a valid email address.');
+    const instance = client();
+    const { error, data } = await instance.auth.setSession({ access_token: active.access, refresh_token: active.refresh });
+    fail(error);
+    if (data.session) res.setHeader('Set-Cookie', sessionCookies(data.session, secure));
+    const result = await instance.auth.updateUser({ email: input.email.trim() }); fail(result.error);
+    return { user: safeUser(result.data.user), message: result.data.user.email === input.email.trim() ? 'Email address updated.' : 'Check your inbox to confirm the email change. Supabase may ask you to confirm from both your current and new address. Your current email stays active until confirmation.' };
   }
   async function list(active, { deleted = false } = {}) {
     const events = [];
@@ -112,5 +171,5 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     const { data, error } = await active.db.rpc('shiftrescue_set_event_deleted', { p_event_id: id, p_expected_version: version, p_deleted: deleted });
     fail(error); return data;
   }
-  return { configured, session, login, logout, list, load, save, setDeleted };
+  return { configured, session, login, logout, profile, saveProfile, avatar, changeEmail, list, load, save, setDeleted };
 }
