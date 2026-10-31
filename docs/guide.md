@@ -323,3 +323,5 @@ The page checks event status every five seconds while visible. Idle views load c
 Owners can reset the code without removing existing members or pending requests. Invalid guesses are counted in the database (20 attempts per minute per account); rejected/revoked users wait one minute to reapply. Up to 500 requests may be pending per event. Access approvals are manual; email and push notifications are future work.
 
 `npm test` runs actual PostgreSQL role-policy tests locally using PGlite, for both a fresh schema and an upgraded database. Tests cover pending-access isolation, requester profile privacy, viewer write denial, owner-only sharing/lifecycle operations, code rotation, rejection, upgrade, demotion, revocation, actor attribution and stale saves.
+
+The public home page introduces AI planning and shared coordination through a Plan together section, owner/editor/viewer role descriptions, and an interactive example of approval, rejection and profile review.

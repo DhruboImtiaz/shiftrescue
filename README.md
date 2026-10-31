@@ -1,6 +1,6 @@
 # ShiftRescue — Volunteer Schedule Rescue
 
-AI-assisted volunteer planning for when plans change. Turn a description or roster photo into an event, build a schedule, and preview changes before saving.
+AI-assisted volunteer planning for when plans change. Turn a description or roster photo into an event, build a schedule, and preview changes before saving. Invite coordinators to work on the same event with approved view or edit access.
 
 Each event supports **80 volunteers, 24 shifts and 1–8 people per shift** on one day in **Asia/Dhaka**.
 

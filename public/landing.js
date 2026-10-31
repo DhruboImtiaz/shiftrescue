@@ -40,6 +40,31 @@ $('[data-demo="mission"]')?.addEventListener('click', () => {
   $('.mission-demo-result').textContent = missionPreview ? 'PREVIEW READY / Nadia → Arif. No other assignments changed. You decide whether to save.' : 'An example, not a saved event.';
 });
 
+// A sample request illustrates owner approval without using account data.
+const sharingOutcomes = {
+  viewer: ['View access approved', 'Can view the team and schedule', 'Rahim can follow the plan. Only the owner chooses who gets access.'],
+  editor: ['Edit access approved', 'Can edit the team and schedule', 'Rahim can help update volunteers, shifts and assignments. The owner can change or remove access.'],
+  reject: ['Request declined', 'No event access granted', 'Rahim has not been added to the event. Knowing a code never grants access by itself.']
+};
+$$('[data-sharing-decision]').forEach(button => button.addEventListener('click', () => {
+  const decision = button.dataset.sharingDecision, [status, detail, message] = sharingOutcomes[decision];
+  $$('[data-sharing-decision]').forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+  $('[data-sharing-status]').textContent = status;
+  $('[data-sharing-status]').classList.toggle('approved', decision !== 'reject');
+  $('[data-sharing-status]').classList.toggle('declined', decision === 'reject');
+  $('[data-sharing-detail]').textContent = detail;
+  $('[data-sharing-result]').textContent = message;
+}));
+$('[data-sharing-reset]')?.addEventListener('click', () => {
+  $$('[data-sharing-decision]').forEach(button => button.setAttribute('aria-pressed', 'false'));
+  $('[data-sharing-status]').textContent = 'Pending approval';
+  $('[data-sharing-status]').classList.remove('approved', 'declined');
+  $('[data-sharing-detail]').textContent = 'Requested edit access';
+  $('[data-sharing-result]').textContent = 'Try an access decision. The owner approves every request.';
+});
+$('[data-sharing-profile]')?.addEventListener('click', () => $('#sharing-example-profile').showModal());
+$$('[data-sharing-profile-close]').forEach(button => button.addEventListener('click', () => $('#sharing-example-profile').close()));
+
 // Reuse the existing same-origin account API. These pages keep the marketing
 // page behind the dialog; an authenticated user continues to the workspace.
 let mode = 'signin', submitting = false, account = null;
