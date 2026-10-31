@@ -2,6 +2,7 @@ import { checkSchedule, clock, parseTime, retainValidAssignments, validateData }
 import { initEventSetup } from '/event-setup.js';
 import { initVoiceInputs } from '/voice.js';
 import { recoverSavedEvent } from '/workspace.js';
+import { initProfile } from '/profile.js';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -28,7 +29,7 @@ $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
 let state, connection = { configured: false, verified: false }, interpretation = null, preview = null, busy = false, editingId = null;
 let editingShiftId = null, editingAssignmentsShiftId = null, editingEvent = false, gemmaIssue = null;
-let eventSetup, voiceInputs;
+let eventSetup, voiceInputs, profileUI;
 let deleteTarget = null;
 try { gemmaIssue = JSON.parse(sessionStorage.getItem('shiftrescue-gemma-issue')); } catch {}
 let auth = { configured: false, user: null }, savedEvents = [], currentEvent = null, authMode = 'signin';
@@ -50,7 +51,7 @@ async function api(path, data, { signal } = {}) {
   const result = await response.json().catch(() => ({ error: response.status === 429 ? 'The site is receiving too many requests. Please wait before retrying.' : 'The server could not respond. Please retry.' }));
   if (!response.ok) {
     if (response.status === 401 && auth.user && !path.startsWith('/api/auth/')) {
-      auth.user = null; eventSetup?.clear(); renderCloud();
+      auth.user = null; eventSetup?.clear(); profileUI?.reset(); renderCloud();
       $('#auth-message').textContent = 'Your session ended. Sign in again to reopen your saved events. Nothing has been deleted.';
       if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
     }
@@ -76,6 +77,7 @@ function setBusy(value, button = null) {
   if (value && button) button.classList.add('busy');
   renderGemmaStatus();
   voiceInputs?.refresh();
+  profileUI?.disable(value);
 }
 function renderConnection() {
   $('#connection-label').textContent = connection.verified ? 'Gemma connected' : connection.configured ? connection.managed ? 'Gemma configured' : 'Verify Gemma connection' : 'Connect Gemma';
@@ -89,7 +91,6 @@ function renderCloud() {
   $('#account-label').textContent = auth.user ? 'My account' : 'Sign in';
   $('#signed-in-panel').classList.toggle('hidden', !auth.user);
   $('#auth-form').classList.toggle('hidden', !!auth.user);
-  $('#signed-in-email').textContent = auth.user?.email || '';
   const choices = currentEvent && !savedEvents.some(e => e.id === currentEvent.id) ? [{ id: currentEvent.id, name: state.event, event_date: state.date }, ...savedEvents] : savedEvents;
   $('#event-select').innerHTML = `<option value="" ${choices.length ? 'disabled' : ''}>Choose a saved event or create a new one</option>` + choices.map(e => `<option value="${escape(e.id)}">${escape(e.name)} · ${escape(e.event_date)}</option>`).join('');
   $('#event-select').value = currentEvent?.id || '';
@@ -127,6 +128,9 @@ function setAuthMode(mode) {
   $('#auth-submit').textContent = mode === 'signup' ? 'Create account' : 'Sign in';
   $('#signin-tab').classList.toggle('active', mode === 'signin'); $('#signup-tab').classList.toggle('active', mode === 'signup');
   $('#auth-password').autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+  $('#signup-fields').classList.toggle('hidden', mode !== 'signup');
+  $('#signup-fields').disabled = mode !== 'signup';
+  $$('#signup-fields input').forEach(input => { input.required = mode === 'signup'; });
   $('#auth-message').textContent = '';
 }
 function metric(label, value, foot, symbol, color = '') { return `<article class="metric"><div><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-foot">${foot}</div></div><span class="metric-icon ${color}">${icon(symbol)}</span></article>`; }
@@ -391,7 +395,8 @@ $('#export-button').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob(['\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a'); link.href = url; link.download = `shiftrescue-${state.date}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-$('#account-button').addEventListener('click', () => { $('#auth-message').textContent = ''; renderCloud(); $('#auth-dialog').showModal(); });
+profileUI = initProfile({ api, getUser: () => auth.user, onEmailChanged(user) { auth.user = user; } });
+$('#account-button').addEventListener('click', () => { $('#auth-message').textContent = ''; renderCloud(); $('#auth-dialog').showModal(); if (auth.user) profileUI.open(); });
 $('#signin-tab').addEventListener('click', () => setAuthMode('signin'));
 $('#signup-tab').addEventListener('click', () => setAuthMode('signup'));
 $('#auth-dialog').addEventListener('close', () => { $('#auth-password').value = ''; });
@@ -401,7 +406,8 @@ $('#auth-form').addEventListener('submit', async event => {
   let authenticated = false;
   const password = $('#auth-password').value; $('#auth-password').value = '';
   try {
-    const result = await api(`/api/auth/${authMode}`, { email: $('#auth-email').value.trim(), password });
+    const result = await api(`/api/auth/${authMode}`, { email: $('#auth-email').value.trim(), password, ...(authMode === 'signup' ? { name: $('#signup-name').value, username: $('#signup-username').value, phone: $('#signup-phone').value } : {}) });
+    $$('#signup-fields input').forEach(input => { input.value = ''; });
     if (result.confirmationRequired) { setAuthMode('signin'); $('#auth-message').textContent = result.message; return; }
     auth.user = result.user; authenticated = true; workspaceStatus('loading'); clearWorkspace(); await restoreCloud(); workspaceStatus('ready'); $('#auth-dialog').close();
     notify(currentEvent ? `Signed in. Reopened “${state.event}”.` : 'Signed in. Create your first event to get started.');
@@ -414,7 +420,7 @@ $('#auth-form').addEventListener('submit', async event => {
 $('#signout-button').addEventListener('click', async () => {
   if (busy) return; setBusy(true, $('#signout-button'));
   try {
-    await api('/api/auth/signout', {}); eventSetup.clear(); auth.user = null; savedEvents = []; clearWorkspace();
+    await api('/api/auth/signout', {}); eventSetup.clear(); auth.user = null; profileUI.reset(); savedEvents = []; clearWorkspace();
     $('#auth-dialog').close(); render(); renderInterpretation(); renderPreview(); showView('board'); notify('Signed out. Your cloud events remain private to your account.');
   } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });

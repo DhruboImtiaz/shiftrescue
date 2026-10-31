@@ -23,6 +23,7 @@ assets.set('/event-setup.js', ['event-setup.js', 'text/javascript; charset=utf-8
 assets.set('/voice.js', ['voice.js', 'text/javascript; charset=utf-8']);
 assets.set('/photo.js', ['photo.js', 'text/javascript; charset=utf-8']);
 assets.set('/workspace.js', ['workspace.js', 'text/javascript; charset=utf-8']);
+assets.set('/profile.js', ['profile.js', 'text/javascript; charset=utf-8']);
 const server = http.createServer(async (req, res) => {
   try {
     const host = req.headers.host;

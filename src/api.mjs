@@ -39,7 +39,7 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         if (request.headers.get('origin') && request.headers.get('origin') !== url.origin) throw new AppError('Requests must come from this app.', 403);
         if (request.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('Cross-site requests are not allowed.', 403);
         if (!String(request.headers.get('content-type') || '').startsWith('application/json')) throw new AppError('Expected an application/json request.', 415);
-        const bodyLimit = pathname === '/api/setup/photo' ? 2900000 : pathname === '/api/voice/transcribe' ? 1450000 : 80000;
+        const bodyLimit = pathname === '/api/setup/photo' || pathname === '/api/profile' ? 2900000 : pathname === '/api/voice/transcribe' ? 1450000 : 80000;
         if (Number(request.headers.get('content-length')) > bodyLimit) throw new AppError('Request is too large.', 413);
         const reader = request.body?.getReader(); let size = 0; const chunks = [];
         if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > bodyLimit) { await reader.cancel(); throw new AppError('Request is too large.', 413); } chunks.push(Buffer.from(chunk.value)); }
@@ -54,6 +54,8 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         }
         if (pathname === '/api/auth/signin' || pathname === '/api/auth/signup') return send(200, await cloud.login(input, res, pathname.endsWith('/signup')));
         if (pathname === '/api/auth/signout') { await cloud.logout(req, res); return send(200, { signedOut: true }); }
+        if (pathname === '/api/profile') return send(200, { profile: await cloud.saveProfile(await cloud.session(req, res, true), input) });
+        if (pathname === '/api/profile/email') return send(200, await cloud.changeEmail(await cloud.session(req, res, true), input, res));
         if (pathname === '/api/events') {
           const active = await cloud.session(req, res, true);
           const initial = input.state || { volunteers: [], shifts: [], schedule: {} };
@@ -135,6 +137,14 @@ export function createApi(env = process.env, { saveConnection } = {}) {
       if (request.method !== 'GET') return send(405, { error: 'Method not supported.' });
       if (pathname === '/api/status') return send(200, { configured: !!config.key && config.key !== 'your_google_ai_studio_key_here', verified, model: config.model, managed: hosted || cloud.configured });
       if (pathname === '/api/auth/session') return send(200, { configured: cloud.configured, user: safeUser((await cloud.session(req, res))?.user) });
+      if (pathname === '/api/profile') return send(200, { profile: await cloud.profile(await cloud.session(req, res, true)) });
+      if (pathname === '/api/profile/avatar') {
+        const image = await cloud.avatar(await cloud.session(req, res, true));
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(image.type)) throw new AppError('This profile photo is unavailable.', 404);
+        headers.set('Content-Type', image.type);
+        headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+        return new Response(await image.arrayBuffer(), { status: 200, headers });
+      }
       if (pathname === '/api/events') return send(200, { events: await cloud.list(await cloud.session(req, res, true)) });
       if (pathname === '/api/events/trash') return send(200, { events: await cloud.list(await cloud.session(req, res, true), { deleted: true }) });
       const event = pathname.match(/^\/api\/events\/([0-9a-f-]{36})$/i);
