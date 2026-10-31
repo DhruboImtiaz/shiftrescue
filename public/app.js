@@ -422,6 +422,7 @@ $('#signout-button').addEventListener('click', async () => {
   try {
     await api('/api/auth/signout', {}); eventSetup.clear(); auth.user = null; profileUI.reset(); savedEvents = []; clearWorkspace();
     $('#auth-dialog').close(); render(); renderInterpretation(); renderPreview(); showView('board'); notify('Signed out. Your cloud events remain private to your account.');
+    location.assign('/');
   } catch (error) { notify(error.message, true); } finally { setBusy(false); }
 });
 $('#edit-event').addEventListener('click', () => { editingEvent = true; openEventDialog(); });
@@ -524,6 +525,7 @@ async function init() {
     if (status.status === 'fulfilled') { connection = status.value; renderConnection(); }
     if (account.status === 'rejected') throw account.reason;
     auth = account.value;
+    if (auth.configured && !auth.user) { location.replace('/?auth=signin'); return; }
     if (auth.user) await restoreCloud();
     else {
       state = emptyWorkspace(); currentEvent = null;

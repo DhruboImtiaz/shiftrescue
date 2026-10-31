@@ -25,8 +25,9 @@ assets.set('/photo.js', ['photo.js', 'text/javascript; charset=utf-8']);
 assets.set('/workspace.js', ['workspace.js', 'text/javascript; charset=utf-8']);
 assets.set('/profile.js', ['profile.js', 'text/javascript; charset=utf-8']);
 assets.set('/landing-drafts.html', ['landing-drafts.html', 'text/html; charset=utf-8']);
-assets.set('/landing-drafts.css', ['landing-drafts.css', 'text/css; charset=utf-8']);
-assets.set('/landing-drafts.js', ['landing-drafts.js', 'text/javascript; charset=utf-8']);
+assets.set('/landing.css', ['landing.css', 'text/css; charset=utf-8']);
+assets.set('/landing.js', ['landing.js', 'text/javascript; charset=utf-8']);
+assets.set('/workspace.html', ['workspace.html', 'text/html; charset=utf-8']);
 assets.set('/landing-assets/volunteer-community.png', ['landing-assets/volunteer-community.png', 'image/png']);
 const server = http.createServer(async (req, res) => {
   try {

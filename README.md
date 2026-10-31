@@ -137,7 +137,7 @@ The API is named the Gemini API, but the app selects a **Gemma** model explicitl
 npm start
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The empty local workspace and manual solver can run without cloud configuration. Sign in to save private events and, when cloud mode is enabled, use Gemma.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) for the Product-first home page, then sign in or create an account to enter your workspace. For local development without cloud configuration, open [the local workspace](http://127.0.0.1:5173/workspace.html) to use the empty workspace and manual solver. Sign in to save private events and, when cloud mode is enabled, use Gemma.
 
 ### Tests & Production Build
 
@@ -297,10 +297,12 @@ Profiles and contact information are private to their owners. The private `shift
 
 Profile verification: `node --test test/profile.test.mjs` checks signup validation, existing-account sign-in, owner-bound writes, photo replacement/removal, upload cleanup on username conflicts, authentication/CSRF boundaries and email confirmation behavior. Run `npm test`, `npm run check` and `npm run build` before release. In a browser, verify signup fields, profile edits surviving reload, optional bio/photo removal, Cancel behavior and duplicate usernames; use two isolated test accounts to confirm direct database/Storage access cannot cross ownership boundaries.
 
-### Landing-page design drafts
+### Home page and design drafts
 
 Open `/landing-drafts.html` to compare **Product-first**, **People-first**, and **Mission control**. Each has its own visual direction, feature/use-case story, top-right sign-in control, and account-creation entry points. The Product-first and Mission control pages include local, clearly labeled interactive scheduling examples; these never call the scheduling API or change an event.
 
-The drafts are intentionally separate from the current `/` workspace so a design can be chosen before making it the home page. Their shared account dialog uses the existing `/api/auth/signin` and `/api/auth/signup` endpoints. Sign-in or an immediately confirmed signup continues to `/`; signup requiring email confirmation keeps the marketing page open and asks the user to confirm and then sign in. Signed-in visitors can choose **Open workspace**. No account session is stored in browser storage and no new database setup is needed.
+The selected **Product-first** design is the home page at `/`. Its copy makes AI-assisted planning explicit: AI interprets text, roster photos and voice notes into editable details and scheduling requests, the scheduling engine checks the plan, and the user approves changes. The former application page is preserved at `/workspace.html`.
+
+The home page and comparison drafts share `/landing.css`, `/landing.js` and an account dialog using the existing `/api/auth/signin` and `/api/auth/signup` endpoints. Sign-in or an immediately confirmed signup continues to `/workspace.html`; signup requiring email confirmation keeps the marketing page open and asks the user to confirm and then sign in. Signed-in visitors can choose **Open workspace**. In cloud mode, a signed-out direct workspace visit returns to `/?auth=signin`; signing out returns home. Temporary session-check failures retain the workspace retry state. No account session is stored in browser storage and no new database setup is needed.
 
 Use `?concept=product`, `?concept=people`, or `?concept=mission` for direct links. The drafts are marked `noindex,nofollow`. The People-first image is illustrative AI-generated marketing imagery; asset provenance and the generation prompt are recorded in `public/landing-assets/README.md`.
