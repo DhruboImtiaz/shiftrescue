@@ -114,7 +114,7 @@ const eventId = '11111111-1111-4111-8111-111111111111';
 const secret = 'incremental-test-secret-'.repeat(3);
 const env = { SUPABASE_URL: 'https://incremental-test.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key', PROPOSAL_SECRET: secret };
 function cloudFixture(t) {
-  let stored = { id: eventId, version: 1, state: fixture() };
+  let stored = { id: eventId, role: 'owner', version: 1, state: fixture() };
   const saves = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     const path = new URL(typeof url === 'string' ? url : url.url).pathname;
@@ -123,7 +123,7 @@ function cloudFixture(t) {
     if (path.endsWith('/shiftrescue_save_event')) {
       const input = JSON.parse(options.body);
       if (input.p_expected_version !== stored.version) return json({ code: 'PT409', message: 'Stale version' }, 409);
-      saves.push(input); stored = { id: eventId, version: stored.version + 1, state: { ...input.p_state, history: [] } }; return json(stored);
+      saves.push(input); stored = { id: eventId, role: 'owner', version: stored.version + 1, state: { ...input.p_state, history: [] } }; return json(stored);
     }
     throw new Error(`Unexpected endpoint: ${path}`);
   });

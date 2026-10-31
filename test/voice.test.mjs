@@ -84,7 +84,7 @@ test('transcription uses only the owned event vocabulary and never saves assignm
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     const path = new URL(typeof url === 'string' ? url : url.url).pathname;
     if (path === '/auth/v1/user') return json({ id: 'owner', email: 'owner@example.test', is_anonymous: false });
-    if (path.endsWith('/shiftrescue_load_event')) return json({ id: eventId, version: 1, state: { event: 'Voice test', date: '2026-10-24', timezone: 'Asia/Dhaka', volunteers: [{ id: 'nadia', name: 'Nadia', skills: [], availability: [[600, 720]], maxHours: 2 }], shifts: [{ id: 'reg-10', station: 'Registration', start: 600, end: 720, required: 1, skills: [] }], schedule: { 'reg-10': [] }, history: [] } });
+    if (path.endsWith('/shiftrescue_load_event')) return json({ id: eventId, role: 'owner', version: 1, state: { event: 'Voice test', date: '2026-10-24', timezone: 'Asia/Dhaka', volunteers: [{ id: 'nadia', name: 'Nadia', skills: [], availability: [[600, 720]], maxHours: 2 }], shifts: [{ id: 'reg-10', station: 'Registration', start: 600, end: 720, required: 1, skills: [] }], schedule: { 'reg-10': [] }, history: [] } });
     if (path.endsWith('/interactions')) {
       providerCalls++; assert.deepEqual(JSON.parse(options.body).generation_config.transcription_config.custom_vocabulary, ['Nadia', 'nadia', 'Registration', 'reg-10']);
       return answer('Assign Nadia to Registration.');
