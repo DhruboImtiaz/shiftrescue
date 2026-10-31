@@ -542,7 +542,7 @@ function showSharedUpdate(message) {
   $('#shared-update-message').textContent = message; $('#shared-update').classList.remove('hidden');
 }
 function closeEventEditors() {
-  for (const id of ['edit-dialog', 'shift-dialog', 'assignment-dialog', 'event-dialog', 'share-dialog']) if ($(`#${id}`).open) $(`#${id}`).close();
+  for (const id of ['edit-dialog', 'shift-dialog', 'assignment-dialog', 'event-dialog', 'member-profile-dialog', 'share-dialog']) if ($(`#${id}`).open) $(`#${id}`).close();
 }
 async function syncSharedEvent() {
   if (!auth.user || busy || syncing || document.hidden || document.body.classList.contains('loading-workspace')) return;

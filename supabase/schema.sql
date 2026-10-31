@@ -419,12 +419,16 @@ begin
   select e.id, e.owner_id into eid, event_owner from public.shiftrescue_events e
     where e.id = p_event_id and e.owner_id = uid and e.deleted_at is null for update;
   if eid is null then raise exception 'Only the event owner can manage sharing.' using errcode = '42501'; end if;
-  if p_action = 'avatar' then
+  if p_action in ('avatar', 'profile') then
     if not exists (select 1 from shiftrescue_private.access_requests r where r.event_id = eid and r.user_id = p_user_id and r.status = 'pending')
       and not exists (select 1 from shiftrescue_private.event_members m where m.event_id = eid and m.user_id = p_user_id) then
       raise exception 'That profile is not available for this event.' using errcode = 'PT404';
     end if;
-    return (select jsonb_build_object('avatarPath', p.avatar_path) from public.shiftrescue_profiles p where p.id = p_user_id);
+    if p_action = 'avatar' then
+      return (select jsonb_build_object('avatarPath', p.avatar_path) from public.shiftrescue_profiles p where p.id = p_user_id);
+    end if;
+    return (select jsonb_build_object('userId', p.id, 'name', p.name, 'username', p.username, 'bio', p.bio, 'email', u.email, 'hasAvatar', p.avatar_path is not null, 'updatedAt', p.updated_at)
+      from public.shiftrescue_profiles p join auth.users u on u.id = p.id where p.id = p_user_id);
   elsif p_action = 'rotate' then
     update shiftrescue_private.event_codes set code = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12)) where event_id = eid;
   elsif p_action = 'decision' then
@@ -479,6 +483,10 @@ create function public.shiftrescue_rotate_event_code(p_event_id uuid)
 returns jsonb language sql security invoker set search_path = '' as $$ select shiftrescue_private.collaboration('rotate', p_event_id); $$;
 create function public.shiftrescue_requester_avatar(p_event_id uuid, p_user_id uuid)
 returns jsonb language sql security invoker set search_path = '' as $$ select shiftrescue_private.collaboration('avatar', p_event_id, p_user_id); $$;
+create function public.shiftrescue_requester_profile(p_event_id uuid, p_user_id uuid)
+returns jsonb language sql security invoker set search_path = '' as $$ select shiftrescue_private.collaboration('profile', p_event_id, p_user_id); $$;
+revoke all on function public.shiftrescue_requester_profile(uuid, uuid) from public, anon;
+grant execute on function public.shiftrescue_requester_profile(uuid, uuid) to authenticated;
 revoke all on function public.shiftrescue_request_access(text, text), public.shiftrescue_my_requests(), public.shiftrescue_event_sharing(uuid), public.shiftrescue_decide_access(uuid, uuid, text), public.shiftrescue_rotate_event_code(uuid), public.shiftrescue_requester_avatar(uuid, uuid) from public, anon;
 grant execute on function public.shiftrescue_request_access(text, text), public.shiftrescue_my_requests(), public.shiftrescue_event_sharing(uuid), public.shiftrescue_decide_access(uuid, uuid, text), public.shiftrescue_rotate_event_code(uuid), public.shiftrescue_requester_avatar(uuid, uuid) to authenticated;
 

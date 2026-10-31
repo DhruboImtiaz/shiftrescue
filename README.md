@@ -24,8 +24,8 @@ Create separate events, copy an accessible event, and edit volunteers, availabil
 
 - Every event has a unique code. The owner copies it from **Share event** and sends it to another user.
 - Signed-in users enter the code in **Join event** and request **View** or **Edit** access. A code permits requests; access requires approval.
-- The owner reviews each requester's name, username, circular profile photo and bio, then grants either role or rejects the request.
-- Approved events appear under **Shared with me** in the event selector. Owners can change roles, remove access and reset the code. Resetting a code keeps existing memberships.
+- The owner clicks a requester's name or circular photo to open their profile, including bio and email, then grants either role or rejects the request.
+- Approved events appear under **Shared with me** in the event selector. Owners can change roles with matching View/Edit buttons, remove access and reset the code. Resetting a code keeps existing memberships.
 
 | Role | Permissions |
 | --- | --- |
@@ -49,7 +49,7 @@ The deterministic scheduler checks staffing, availability, overlaps, required sk
 
 ### Cloud Storage, Profiles & Export
 
-Supabase stores events and account profiles. **My account** lets users edit their name, username, phone, optional bio and circular profile photo. Event owners can preview requesters' and members' profile details; email and phone stay private. Export schedules as CSV.
+Supabase stores events and account profiles. **My account** lets users edit their name, username, phone, optional bio and circular profile photo. Event owners can open requesters' and members' profiles to see their name, username, photo, bio and email. Phone numbers stay private. Export schedules as CSV.
 
 ## Tech Stack
 
@@ -123,7 +123,7 @@ Events remain saved after their date passes. Owners can move events to Trash and
 
 ## Data Storage
 
-Access is checked using the signed-in user's identity and database permissions. Memberships, requests and event codes live in a private database schema. Contact details remain private, and profile photos use a private Storage bucket. Sessions use HttpOnly cookies. Original roster photos and recordings are sent to Google only for the requested AI operation and are not stored in the event database.
+Access is checked using the signed-in user's identity and database permissions. Memberships, requests and event codes live in a private database schema. Phone numbers remain private. Email is shared only with the owner of an event where the user has requested access or is an approved member. Profile photos use a private Storage bucket. Sessions use HttpOnly cookies. Original roster photos and recordings are sent to Google only for the requested AI operation and are not stored in the event database.
 
 ## Roadmap / Known Limitations
 

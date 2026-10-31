@@ -48,6 +48,10 @@ begin
   assert not (result->'requests'->0 ? 'phone') and not (result->'requests'->0 ? 'email'), 'Contact data in preview';
   assert shiftrescue_private.can_read_shared_avatar(photo), 'Owner cannot preview pending photo';
   assert (public.shiftrescue_requester_avatar(eid, viewer_uid)->>'avatarPath') = photo;
+  result := public.shiftrescue_requester_profile(eid, viewer_uid);
+  assert result->>'email' = viewer_uid::text || '@example.test', 'Profile email must come from Auth';
+  assert result->>'name' = 'Viewer test';
+  assert not (result ? 'phone'), 'Phone exposed in profile popup';
   assert (public.shiftrescue_event_status(eid)->>'pendingRequests')::integer = 1;
   perform public.shiftrescue_decide_access(eid, viewer_uid, 'viewer');
   perform set_config('request.jwt.claim.sub', viewer_uid::text, true);
@@ -89,6 +93,7 @@ begin
   begin update public.shiftrescue_events set deleted_at = now() where id = eid; raise exception 'Editor deleted directly'; exception when insufficient_privilege then null; end;
   begin perform public.shiftrescue_decide_access(eid, stranger_uid, 'editor'); raise exception 'Editor approved members'; exception when insufficient_privilege then null; end;
   assert not shiftrescue_private.can_read_shared_avatar(photo), 'Editor viewed another member photo';
+  begin perform public.shiftrescue_requester_profile(eid, viewer_uid); raise exception 'Editor read another user email'; exception when insufficient_privilege then null; end;
   perform set_config('request.jwt.claim.sub', stranger_uid::text, true);
   perform set_config('request.jwt.claims', jsonb_build_object('sub', stranger_uid, 'is_anonymous', false)::text, true);
   assert public.shiftrescue_load_event(eid) is null;
@@ -101,6 +106,7 @@ begin
   result := public.shiftrescue_rotate_event_code(eid); assert result->>'code' <> old_code;
   perform public.shiftrescue_decide_access(eid, viewer_uid, 'remove');
   assert not shiftrescue_private.can_read_shared_avatar(photo), 'Revoked photo still visible';
+  begin perform public.shiftrescue_requester_profile(eid, viewer_uid); raise exception 'Revoked member email still exposed'; exception when sqlstate 'PT404' then null; end;
   perform set_config('request.jwt.claim.sub', viewer_uid::text, true);
   perform set_config('request.jwt.claims', jsonb_build_object('sub', viewer_uid, 'is_anonymous', false)::text, true);
   assert public.shiftrescue_load_event(eid) is null, 'Revoked member read event';

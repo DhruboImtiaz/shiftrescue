@@ -17,7 +17,7 @@ function fixture(t, role = 'viewer') {
     calls.push({ operation, input });
     if (operation === 'shiftrescue_load_event') return json({ id: eventId, role: state.role, version: state.version, state: structuredClone(demo) });
     if (operation === 'shiftrescue_event_status') return json({ id: eventId, role: state.role, version: state.version, pendingRequests: 0 });
-    if (['shiftrescue_event_sharing', 'shiftrescue_decide_access', 'shiftrescue_rotate_event_code', 'shiftrescue_requester_avatar'].includes(operation)) return state.role === 'owner' ? json({ eventId, code: 'ABCDEF123456', requests: [], members: [] }) : json({ code: '42501', message: 'Only the event owner can manage sharing.' }, 403);
+    if (['shiftrescue_event_sharing', 'shiftrescue_decide_access', 'shiftrescue_rotate_event_code', 'shiftrescue_requester_avatar', 'shiftrescue_requester_profile'].includes(operation)) return state.role === 'owner' ? json(operation === 'shiftrescue_requester_profile' ? { userId: input.p_user_id, name: 'Requester', username: 'requester', bio: 'I help coordinate.', email: 'requester@example.test', hasAvatar: true, updatedAt: '2026-11-01', phone: '+8801700000001', avatarPath: 'private/path.png' } : { eventId, code: 'ABCDEF123456', requests: [], members: [] }) : json({ code: '42501', message: 'Only the event owner can manage sharing.' }, 403);
     if (operation === 'shiftrescue_request_access') return input.p_code === '000000000000' ? json({ error: 'Too many code attempts.', status: 429 }) : json({ message: 'Request sent.', status: 'pending', eventId });
     if (operation === 'shiftrescue_my_requests') return json([{ eventId, requestedRole: 'editor', status: 'pending' }]);
     if (operation === 'shiftrescue_save_event') return json({ id: eventId, role: state.role, version: ++state.version, state: { ...input.p_state, history: [] } });
@@ -29,7 +29,7 @@ function fixture(t, role = 'viewer') {
 test('sharing, request status and profile-photo routes require authentication', async t => {
   let calls = 0; t.mock.method(globalThis, 'fetch', async () => { calls++; throw new Error('Unexpected provider call'); });
   const api = createApi(env);
-  for (const [path, body] of [['/api/access/requests'], ['/api/access/request', { code: 'ABCDEF123456', role: 'viewer' }], [`/api/events/${eventId}/sharing`], [`/api/events/${eventId}/sharing`, { action: 'rotate' }], [`/api/events/${eventId}/status`], [`/api/events/${eventId}/people/${userId}/avatar`]]) assert.equal((await api(request(path, body, { signedIn: false }))).status, 401);
+  for (const [path, body] of [['/api/access/requests'], ['/api/access/request', { code: 'ABCDEF123456', role: 'viewer' }], [`/api/events/${eventId}/sharing`], [`/api/events/${eventId}/sharing`, { action: 'rotate' }], [`/api/events/${eventId}/status`], [`/api/events/${eventId}/people/${userId}/avatar`], [`/api/events/${eventId}/people/${userId}/profile`]]) assert.equal((await api(request(path, body, { signedIn: false }))).status, 401);
   assert.equal(calls, 0);
 });
 test('requesting access preserves the selected role and returns a pending status', async t => {
@@ -59,7 +59,7 @@ test('viewers can read events and status, but cannot interpret, preview, edit, o
 });
 test('only owners can read requests, approve members, rotate codes or preview requester photos', async t => {
   const { api } = fixture(t, 'editor');
-  for (const [path, body] of [[`/api/events/${eventId}/sharing`], [`/api/events/${eventId}/sharing`, { userId, decision: 'editor' }], [`/api/events/${eventId}/sharing`, { action: 'rotate' }], [`/api/events/${eventId}/people/${userId}/avatar`]]) assert.equal((await api(request(path, body))).status, 403);
+  for (const [path, body] of [[`/api/events/${eventId}/sharing`], [`/api/events/${eventId}/sharing`, { userId, decision: 'editor' }], [`/api/events/${eventId}/sharing`, { action: 'rotate' }], [`/api/events/${eventId}/people/${userId}/avatar`], [`/api/events/${eventId}/people/${userId}/profile`]]) assert.equal((await api(request(path, body))).status, 403);
 });
 test('a previously signed preview cannot be applied after edit access is removed', async t => {
   const { api, calls, state } = fixture(t, 'editor');
@@ -74,4 +74,19 @@ test('owner decisions bind the event and requester IDs and reject invented decis
   assert.equal((await api(request(`/api/events/${eventId}/sharing`, { userId, decision: 'viewer' }))).status, 200);
   assert.deepEqual(calls.at(-1).input, { p_event_id: eventId, p_user_id: userId, p_decision: 'viewer' });
   assert.equal((await api(request(`/api/events/${eventId}/sharing`, { userId, decision: 'owner' }))).status, 400);
+});
+
+test('owner profile popups expose the requested email and bio without private phone or storage paths', async t => {
+  const { api, calls } = fixture(t, 'owner');
+  const requesterId = '33333333-3333-4333-8333-333333333333';
+  const response = await api(request(`/api/events/${eventId}/people/${requesterId}/profile`));
+  assert.equal(response.status, 200);
+  const { profile } = await response.json();
+  assert.equal(profile.email, 'requester@example.test');
+  assert.equal(profile.bio, 'I help coordinate.');
+  assert.equal(profile.userId, requesterId);
+  assert.match(profile.avatarUrl, new RegExp(`/people/${requesterId}/avatar`));
+  assert.equal(Object.hasOwn(profile, 'phone'), false);
+  assert.equal(Object.hasOwn(profile, 'avatarPath'), false);
+  assert.deepEqual(calls.at(-1).input, { p_event_id: eventId, p_user_id: requesterId });
 });

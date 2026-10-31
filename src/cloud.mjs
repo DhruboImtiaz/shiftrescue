@@ -196,5 +196,10 @@ export function cloudService({ url, key, secure = false, createSupabaseClient = 
     const { data, error } = await active.db.storage.from(AVATAR_BUCKET).download(row.avatarPath);
     fail(error); return data;
   }
-  return { configured, session, login, logout, profile, saveProfile, avatar, changeEmail, list, load, save, setDeleted, requestAccess, sharing, requesterAvatar, eventStatus: async (active, id) => { const result = await collaboration(active, 'event_status', { p_event_id: id }); if (!result) throw new AppError('This event is no longer available to your account.', 404); return result; }, myRequests: active => collaboration(active, 'my_requests') };
+  async function requesterProfile(active, id, userId) {
+    const data = await collaboration(active, 'requester_profile', { p_event_id: id, p_user_id: userId });
+    if (!data) throw new AppError('This profile is no longer available for the event.', 404);
+    return { userId: data.userId, name: data.name, username: data.username, bio: data.bio, email: data.email, avatarUrl: data.hasAvatar ? `/api/events/${id}/people/${userId}/avatar?v=${encodeURIComponent(data.updatedAt)}` : null };
+  }
+  return { configured, session, login, logout, profile, saveProfile, avatar, changeEmail, list, load, save, setDeleted, requestAccess, sharing, requesterAvatar, requesterProfile, eventStatus: async (active, id) => { const result = await collaboration(active, 'event_status', { p_event_id: id }); if (!result) throw new AppError('This event is no longer available to your account.', 404); return result; }, myRequests: active => collaboration(active, 'my_requests') };
 }

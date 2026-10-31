@@ -154,9 +154,11 @@ export function createApi(env = process.env, { saveConnection } = {}) {
         const active = await cloud.session(req, res, true);
         return send(200, sharing[2] === 'sharing' ? await cloud.sharing(active, sharing[1]) : await cloud.eventStatus(active, sharing[1]));
       }
-      const requesterPhoto = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/people\/([0-9a-f-]{36})\/avatar$/i);
+      const requesterPhoto = pathname.match(/^\/api\/events\/([0-9a-f-]{36})\/people\/([0-9a-f-]{36})\/(avatar|profile)$/i);
       if (requesterPhoto) {
-        const photo = await cloud.requesterAvatar(await cloud.session(req, res, true), requesterPhoto[1], requesterPhoto[2]);
+        const active = await cloud.session(req, res, true);
+        if (requesterPhoto[3] === 'profile') return send(200, { profile: await cloud.requesterProfile(active, requesterPhoto[1], requesterPhoto[2]) });
+        const photo = await cloud.requesterAvatar(active, requesterPhoto[1], requesterPhoto[2]);
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(photo.type)) throw new AppError('This profile photo is unavailable.', 404);
         headers.set('Content-Type', photo.type); headers.set('Cross-Origin-Resource-Policy', 'same-origin');
         return new Response(await photo.arrayBuffer(), { status: 200, headers });

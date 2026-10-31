@@ -4,7 +4,7 @@ const roleLabel = role => role === 'editor' ? 'Edit' : 'View';
 
 export function initCollaboration({ api, context, setBusy, onChanged, onOpen, notify }) {
   let sharing = null, loading = false, generation = 0, requestSnapshot = '';
-  let expandedProfiles = new Set();
+  let profilePersonId = null, profileGeneration = 0;
   function render() {
     const { auth, currentEvent, busy } = context();
     $('#join-event').classList.toggle('hidden', !auth.user);
@@ -19,16 +19,55 @@ export function initCollaboration({ api, context, setBusy, onChanged, onOpen, no
   function personCard(p, pending) {
     const id = sharing.eventId;
     const photo = p.hasAvatar ? `<img src="/api/events/${escape(id)}/people/${escape(p.userId)}/avatar?v=${encodeURIComponent(p.profileUpdatedAt)}" alt="${escape(p.name || p.username || 'Member')}'s profile photo" loading="lazy">` : '';
-    return `<article class="sharing-person"><div class="sharing-person-heading"><span class="sharing-avatar"><span aria-hidden="true">${escape((p.name || p.username || '?').slice(0, 1).toUpperCase())}</span>${photo}</span><div><strong>${escape(p.name || p.username || 'Coordinator')}</strong><small>${p.username ? `@${escape(p.username)}` : 'Username not added'}</small><span class="badge neutral">${pending ? `Requests ${roleLabel(p.requestedRole).toLowerCase()} access` : `${roleLabel(p.role)} access`}</span></div></div><details data-profile="${escape(p.userId)}" ${expandedProfiles.has(p.userId) ? 'open' : ''}><summary>View profile</summary><p class="sharing-bio">${escape(p.bio || 'No bio added.')}</p></details><div class="sharing-person-actions">${pending ? `<button type="button" class="button subtle small" data-person="${escape(p.userId)}" data-decision="viewer">Give view access</button><button type="button" class="button primary small" data-person="${escape(p.userId)}" data-decision="editor">Give edit access</button><button type="button" class="button subtle small danger" data-person="${escape(p.userId)}" data-decision="reject">Reject</button>` : `<label>Access<select data-person="${escape(p.userId)}" aria-label="Access for ${escape(p.name || p.username || 'member')}"><option value="viewer" ${p.role === 'viewer' ? 'selected' : ''}>View</option><option value="editor" ${p.role === 'editor' ? 'selected' : ''}>Edit</option></select></label><button type="button" class="button subtle small danger" data-person="${escape(p.userId)}" data-decision="remove">Remove access</button>`}</div></article>`;
+    const name = p.name || p.username || 'Coordinator';
+    const choices = ['viewer', 'editor'].map(role => `<button type="button" class="button ${p.role === role ? 'primary' : 'subtle'} small" data-person="${escape(p.userId)}" data-decision="${role}" aria-pressed="${p.role === role}">${roleLabel(role)}</button>`).join('');
+    return `<article class="sharing-person"><div class="sharing-person-heading"><button type="button" class="sharing-avatar profile-trigger" data-profile-person="${escape(p.userId)}" aria-label="Open profile for ${escape(name)}"><span aria-hidden="true">${escape(name.slice(0, 1).toUpperCase())}</span>${photo}</button><div class="sharing-identity"><button type="button" class="sharing-name profile-trigger" data-profile-person="${escape(p.userId)}" aria-label="Open profile for ${escape(name)}">${escape(name)}</button><small>${p.username ? `@${escape(p.username)}` : 'Username not added'}</small><span class="badge neutral">${pending ? `Requests ${roleLabel(p.requestedRole).toLowerCase()} access` : `${roleLabel(p.role)} access`}</span></div></div><div class="sharing-person-actions">${pending ? `<button type="button" class="button subtle small" data-person="${escape(p.userId)}" data-decision="viewer">Give view access</button><button type="button" class="button primary small" data-person="${escape(p.userId)}" data-decision="editor">Give edit access</button><button type="button" class="button subtle small danger" data-person="${escape(p.userId)}" data-decision="reject">Reject</button>` : `<div class="access-choices compact" role="group" aria-label="Access for ${escape(name)}">${choices}</div><button type="button" class="button subtle small danger" data-person="${escape(p.userId)}" data-decision="remove">Remove access</button>`}</div></article>`;
   }
   function renderSharing() {
-    expandedProfiles = new Set([...document.querySelectorAll('#sharing-controls details[open]')].map(el => el.dataset.profile));
     $('#share-requests').innerHTML = sharing.requests.map(p => personCard(p, true)).join('') || '<p class="fine-print">No pending requests.</p>';
     $('#share-members').innerHTML = sharing.members.map(p => personCard(p, false)).join('') || '<p class="fine-print">You are the only person with access.</p>';
     $('#share-request-count').textContent = sharing.requests.length;
     document.querySelectorAll('.sharing-avatar img').forEach(img => img.addEventListener('error', () => img.remove(), { once: true }));
+    if (profilePersonId && ![...sharing.requests, ...sharing.members].some(p => p.userId === profilePersonId)) $('#member-profile-dialog').close();
     render();
   }
+  async function loadProfile() {
+    const userId = profilePersonId, eventId = sharing?.eventId, ticket = ++profileGeneration;
+    if (!userId || !eventId) return;
+    try {
+      const { profile } = await api(`/api/events/${eventId}/people/${userId}/profile`);
+      if (ticket !== profileGeneration || profilePersonId !== userId || !$('#member-profile-dialog').open || context().currentEvent?.id !== eventId) return;
+      $('#member-profile-name').textContent = profile.name || profile.username || 'Coordinator';
+      $('#member-profile-username').textContent = profile.username ? `@${profile.username}` : 'Username not added';
+      $('#member-profile-bio').textContent = profile.bio || 'No bio added.';
+      $('#member-profile-email').textContent = profile.email || 'Email not added';
+      $('#member-profile-initials').textContent = (profile.name || profile.username || '?').slice(0, 1).toUpperCase();
+      const photo = $('#member-profile-photo');
+      photo.classList.add('hidden');
+      photo.onload = () => { if (profilePersonId === userId) { photo.classList.remove('hidden'); $('#member-profile-initials').classList.add('hidden'); } };
+      photo.onerror = () => { photo.classList.add('hidden'); $('#member-profile-initials').classList.remove('hidden'); };
+      $('#member-profile-initials').classList.remove('hidden');
+      if (profile.avatarUrl) { if (photo.getAttribute('src') !== profile.avatarUrl) photo.src = profile.avatarUrl; else if (photo.complete && photo.naturalWidth) { photo.classList.remove('hidden'); $('#member-profile-initials').classList.add('hidden'); } }
+      else photo.removeAttribute('src');
+      $('#member-profile-content').classList.remove('hidden'); $('#member-profile-message').textContent = '';
+    } catch (error) {
+      if (ticket !== profileGeneration || !$('#member-profile-dialog').open) return;
+      $('#member-profile-content').classList.add('hidden'); $('#member-profile-photo').removeAttribute('src');
+      $('#member-profile-message').textContent = error.message;
+    }
+  }
+  function openProfile(userId) {
+    if (context().busy || !sharing) return;
+    profilePersonId = userId;
+    $('#member-profile-content').classList.add('hidden'); $('#member-profile-message').textContent = 'Opening profile…';
+    $('#member-profile-dialog').showModal(); loadProfile();
+  }
+  $('#member-profile-dialog').addEventListener('close', () => {
+    profileGeneration++; profilePersonId = null; $('#member-profile-content').classList.add('hidden');
+    $('#member-profile-photo').removeAttribute('src'); $('#member-profile-name').textContent = ''; $('#member-profile-username').textContent = '';
+    $('#member-profile-email').textContent = ''; $('#member-profile-bio').textContent = '';
+  });
+  $('#member-profile-back').addEventListener('click', () => $('#member-profile-dialog').close());
   async function loadSharing() {
     const id = context().currentEvent?.id, ticket = ++generation;
     if (!id) return;
@@ -72,12 +111,12 @@ export function initCollaboration({ api, context, setBusy, onChanged, onOpen, no
   }
   $('#reset-event-code').addEventListener('click', () => { if (confirm('Reset this event code? Previous codes will stop accepting requests. Existing members keep their access.')) changeAccess({ action: 'rotate' }); });
   $('#sharing-controls').addEventListener('click', event => {
+    const profile = event.target.closest('[data-profile-person]');
+    if (profile) { openProfile(profile.dataset.profilePerson); return; }
     const button = event.target.closest('[data-decision]'); if (!button) return;
+    if (sharing?.members.some(p => p.userId === button.dataset.person && p.role === button.dataset.decision)) return;
     if (button.dataset.decision === 'remove' && !confirm('Remove this person’s access to the event?')) return;
     changeAccess({ userId: button.dataset.person, decision: button.dataset.decision });
-  });
-  $('#sharing-controls').addEventListener('change', event => {
-    if (event.target.matches('select[data-person]')) changeAccess({ userId: event.target.dataset.person, decision: event.target.value });
   });
   $('#join-event').addEventListener('click', async () => {
     $('#join-message').textContent = ''; $('#join-dialog').showModal();
@@ -87,7 +126,7 @@ export function initCollaboration({ api, context, setBusy, onChanged, onOpen, no
     event.preventDefault(); if (context().busy) return;
     setBusy(true); $('#join-fields').disabled = true;
     try {
-      const result = await api('/api/access/request', { code: $('#join-code').value.trim(), role: $('#join-role').value });
+      const result = await api('/api/access/request', { code: $('#join-code').value.trim(), role: $('#join-role input:checked').value });
       $('#join-message').textContent = result.message; await loadRequests();
       if (result.role) await onChanged();
     } catch (error) { $('#join-message').textContent = error.message; }
@@ -100,8 +139,9 @@ export function initCollaboration({ api, context, setBusy, onChanged, onOpen, no
   return { render, async refresh() {
     if (!context().auth.user || context().busy || loading) return;
     try {
-      if ($('#share-dialog').open && document.activeElement?.tagName !== 'SELECT') await loadSharing();
+      if ($('#share-dialog').open) await loadSharing();
+      if ($('#member-profile-dialog').open) await loadProfile();
       if ($('#join-dialog').open) await loadRequests();
     } catch (error) { ($('#share-dialog').open ? $('#share-message') : $('#join-message')).textContent = error.message; }
-  }, reset() { generation++; sharing = null; loading = false; requestSnapshot = ''; expandedProfiles.clear(); $('#my-access-requests').replaceChildren(); $('#share-requests').replaceChildren(); $('#share-members').replaceChildren(); $('#join-code').value = ''; $('#join-message').textContent = ''; $('#share-message').textContent = ''; $('#share-dialog').close(); $('#join-dialog').close(); render(); } };
+  }, reset() { generation++; sharing = null; loading = false; requestSnapshot = ''; $('#member-profile-dialog').close(); $('#my-access-requests').replaceChildren(); $('#share-requests').replaceChildren(); $('#share-members').replaceChildren(); $('#join-code').value = ''; $('#join-message').textContent = ''; $('#share-message').textContent = ''; $('#share-dialog').close(); $('#join-dialog').close(); render(); } };
 }
