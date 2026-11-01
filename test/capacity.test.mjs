@@ -83,6 +83,7 @@ test('full-size previews exceeding the old token limit can be applied through th
   let writes = 0;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (String(url).endsWith('/auth/v1/user')) return new Response(JSON.stringify({ id: userId, email: 'owner@example.test', is_anonymous: false }));
+    if (String(url).endsWith('/shiftrescue_load_event')) return new Response(JSON.stringify({ id: eventId, role: 'owner', version: 1, state: e }));
     assert.match(String(url), /rpc\/shiftrescue_save_event$/); writes++;
     const input = JSON.parse(options.body); assert.equal(input.p_state.volunteers.length, 80); assert.equal(input.p_state.shifts.length, 24);
     return new Response(JSON.stringify({ id: eventId, version: 2, state: { ...input.p_state, history: [] } }));

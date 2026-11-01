@@ -16,3 +16,64 @@
 @media(max-width:650px){.stage-caption{font-size:7px}.stage-caption>span:last-child{font-size:6px}.mini-app-head{font-size:9px}.date-chip{font-size:6px}.mini-overline{font-size:7px}.coverage{font-size:8px;white-space:normal;max-width:90px}.schedule-head{font-size:7px}.person-slot{font-size:10px}.person-slot small{font-size:7px}.slot-time{font-size:9px}.slot-time small{font-size:8px}.mini-request{font-size:10px}.mini-request small{font-size:8px}.demo-result,.stage-note{font-size:8px}.mission-stage-head{font-size:7px}.mission-stage-head>span:last-child{font-size:6px}.change-node .node-label,.cover-node .node-label{font-size:8px}.small-signal{font-size:8px}.mission-demo-result{font-size:8px}.mission-visual-footer>span:first-child{font-size:7px}.people-roster-kicker{font-size:8px}.example-label{font-size:8px}}
 
 .homepage{scroll-padding-top:30px}.hero-ai-line{font-size:14px;line-height:1.6;color:var(--accent);font-weight:600;margin:-7px 0 12px}.homepage .product-hero{padding-top:40px}@media(max-width:650px){.hero-ai-line{font-size:12px;margin:-5px 0 12px}.homepage .product-hero{padding-top:23px}}
+
+/* Shared event coordination */
+.together-section{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;padding-top:12px;padding-bottom:96px}
+@media(min-width:901px){.together-section>.sharing-showcase{grid-column:1;grid-row:1}.together-section>.together-copy{grid-column:2;grid-row:1}}
+.together-copy>.eyebrow{color:var(--accent);margin-bottom:20px}
+.together-copy>h2{font-size:43px;line-height:1.15;letter-spacing:-1.8px;font-weight:550}
+.together-copy>p:not(.eyebrow):not(.together-note){font-size:14px;line-height:1.9;color:var(--muted);margin:22px 0;max-width:430px}
+.together-steps{list-style:none;padding:0;margin:28px 0 30px;display:grid;gap:22px}
+.together-steps li{display:flex;gap:17px;align-items:flex-start}
+.together-steps li>span{font-size:10px;letter-spacing:1px;color:var(--accent);padding-top:4px}
+.together-steps h3{font-size:15px;font-weight:600;line-height:1.5;margin-bottom:5px;letter-spacing:-.2px}
+.together-steps p{font-size:12px;line-height:1.8;color:var(--muted);max-width:365px}
+.together-note{font-size:11px;line-height:1.7;color:var(--muted);margin-top:15px}
+.sharing-showcase{min-width:0;padding:20px;background:#eeedf7;border:1px solid #e0deef;border-radius:16px}
+.sharing-showcase-caption{display:flex;justify-content:space-between;gap:12px;font-size:8px;font-weight:650;letter-spacing:1.1px;color:#777593;margin:1px 1px 17px}
+.sharing-showcase-caption>span:last-child{font-size:7px}
+.sharing-example-card{background:#fff;border:1px solid #e5e3ee;border-radius:10px;padding:25px;box-shadow:0 15px 30px #454b7d08}
+.sharing-example-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.sharing-example-header h3{font-size:26px;line-height:1.18;letter-spacing:-1px;font-weight:550;margin-top:11px}
+.sharing-owner-tag{background:#efedfc;color:#6d61b2;font-size:9px;padding:7px 9px;border-radius:5px;white-space:nowrap}
+.sharing-example-code{margin:25px 0;padding:14px;background:#f8f8fc;border:1px solid #e9e8f1;border-radius:7px}
+.sharing-example-code>span{display:block;font-size:8px;letter-spacing:1px;color:#9290a6;margin-bottom:9px}
+.sharing-example-code strong{font:600 15px ui-monospace,monospace;letter-spacing:1.8px;color:#55506f}
+.sharing-example-label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:8px;letter-spacing:1px;color:#9692a7;margin:5px 0 15px}
+.sharing-example-status{font-size:9px;letter-spacing:0;line-height:1.5;padding:5px 7px;background:#fff5e8;color:#a3794d;border-radius:5px}
+.sharing-example-status.approved{background:#edf6ed;color:#47764d}
+.sharing-example-status.declined{background:#fff0ef;color:#aa6464}
+.sharing-example-person-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding-bottom:21px;border-bottom:1px solid #efedf5}
+.sharing-example-person{display:flex;align-items:center;gap:10px;text-align:left;min-width:0;padding:0;background:none;border-radius:6px;color:var(--ink)}
+.sharing-example-avatar{width:38px;height:38px;flex:0 0 38px;display:inline-grid;place-items:center;border-radius:50%;background:#e9e5fb;color:#7863ba;font-size:14px;font-weight:600}
+.sharing-example-person strong{display:block;font-size:12px;font-weight:650;line-height:1.5}
+.sharing-example-person:hover strong{color:var(--accent)}
+.sharing-example-person small{display:block;font-size:9px;color:#9290a5;line-height:1.5;margin-top:3px}
+.sharing-example-actions{display:flex;align-items:center;gap:5px}
+.sharing-example-actions button{font:600 10px/1.4 Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#77718d;background:#f6f5fa;border:1px solid #e7e4ef;border-radius:6px;padding:8px 10px;min-height:33px;transition:background .15s,color .15s}
+.sharing-example-actions button:hover{background:#eeebf8}
+.sharing-example-actions button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.sharing-example-actions button[data-sharing-decision=reject][aria-pressed=true]{background:#fff0ef;border-color:#eccfcb;color:#a55555}
+.sharing-example-result{font-size:10px;line-height:1.8;color:#7d7891;min-height:52px;margin:16px 0 12px}
+.sharing-role-guide{display:grid;gap:9px;padding:14px 0;border-top:1px solid #efedf5;border-bottom:1px solid #efedf5;font-size:10px;color:#8b879d}
+.sharing-role-guide b{display:inline-block;min-width:44px;color:#625c78;font-weight:600}
+.sharing-example-reset{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;font-weight:600;min-height:36px;padding:9px 12px;border:1px solid #e7e4ef;border-radius:6px;background:#f6f5fa;color:#77718d;width:100%;margin-top:18px}
+.sharing-example-reset:hover{background:#eeebf8}
+.sharing-example-footnote{text-align:center;color:#8b86a0;font-size:9px;line-height:1.7;margin-top:15px}
+.sharing-example-profile{width:min(450px,calc(100vw - 32px));border:1px solid #dedbe9;border-radius:14px;padding:32px;color:var(--ink);background:#fff}
+.sharing-example-profile::backdrop{background:#2d294b66;backdrop-filter:blur(5px)}
+.sharing-example-profile .auth-close{position:absolute;top:14px;right:14px}
+.sharing-example-profile .auth-eyebrow{color:var(--accent);margin:4px 0 26px}
+.sharing-profile-heading{display:flex;align-items:center;gap:15px;margin-bottom:24px}
+.sharing-profile-heading .sharing-example-avatar{width:66px;height:66px;flex-basis:66px;font-size:24px}
+.sharing-profile-heading h2{font-size:23px;font-weight:600;letter-spacing:-.8px}
+.sharing-profile-heading p{font-size:12px;color:var(--muted);margin-top:6px}
+.sharing-profile-bio{font-size:13px;line-height:1.85;color:var(--muted)}
+.sharing-example-profile dl{margin:22px 0 26px;padding-top:18px;border-top:1px solid var(--line)}
+.sharing-example-profile dt{font-size:10px;color:var(--muted);margin-bottom:7px}
+.sharing-example-profile dd{font-size:13px;margin:0;overflow-wrap:anywhere}
+.sharing-profile-note{font-size:10px;color:var(--muted);line-height:1.8;margin-bottom:22px}
+.sharing-example-profile>.cta{width:100%}
+@media(max-width:1150px){.together-section{gap:40px}.sharing-example-card{padding:20px}.sharing-example-actions button{padding:8px}.sharing-example-person-row{gap:10px}}
+@media(max-width:900px){.together-section{grid-template-columns:1fr;gap:42px}.together-copy>p:not(.eyebrow):not(.together-note){max-width:580px}.together-steps p{max-width:520px}.sharing-showcase{max-width:620px;width:100%;margin-inline:auto}}
+@media(max-width:650px){.together-section{padding-top:0;padding-bottom:55px;gap:30px}.together-copy>h2{font-size:34px;letter-spacing:-1.3px}.together-copy>p:not(.eyebrow):not(.together-note){font-size:13px;line-height:1.85;margin-top:18px}.together-steps{gap:19px;margin:24px 0}.together-steps h3{font-size:14px}.together-steps p{font-size:12px}.sharing-showcase{padding:14px}.sharing-example-card{padding:18px 16px}.sharing-showcase-caption{font-size:7px;letter-spacing:.6px}.sharing-showcase-caption>span:last-child{font-size:6px}.sharing-example-header h3{font-size:25px}.sharing-owner-tag{font-size:8px;padding:6px}.sharing-example-person-row{grid-template-columns:minmax(0,1fr) 74px;gap:12px}.sharing-example-actions{flex-direction:column;align-items:stretch;gap:5px}.sharing-example-actions button{width:100%;padding:7px 8px;min-height:31px}.sharing-example-avatar{width:34px;height:34px;flex-basis:34px}.sharing-example-person{gap:8px}.sharing-example-person strong{font-size:12px}.sharing-example-person small{font-size:10px}.sharing-example-code strong{font-size:14px;letter-spacing:1px}.sharing-example-label{letter-spacing:.6px}.sharing-example-result{font-size:11px;min-height:0}.sharing-role-guide{font-size:11px}.sharing-example-profile{padding:27px 23px}}
